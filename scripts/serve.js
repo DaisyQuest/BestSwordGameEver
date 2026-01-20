@@ -6,7 +6,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const DEFAULT_PORT = 5173;
 const DEFAULT_HOST = "0.0.0.0";
 
-const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)), "client");
+const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const CLIENT_ROOT = resolve(REPO_ROOT, "client");
+const SHARED_ROOT = resolve(REPO_ROOT, "shared");
+
+const ASSET_MOUNTS = [
+  { prefix: "/shared/", root: SHARED_ROOT, strip: "/shared" },
+  { prefix: "/", root: CLIENT_ROOT, strip: "" }
+];
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -33,8 +40,13 @@ export const resolveAssetPath = (url) => {
     return null;
   }
   const relative = sanitized === "/" ? "/index.html" : sanitized;
-  const resolved = resolve(ROOT, `.${relative}`);
-  if (!resolved.startsWith(ROOT)) {
+  const mount = ASSET_MOUNTS.find(({ prefix }) => relative.startsWith(prefix));
+  if (!mount) {
+    return null;
+  }
+  const mountRelative = relative.slice(mount.strip.length);
+  const resolved = resolve(mount.root, `.${mountRelative}`);
+  if (!resolved.startsWith(mount.root)) {
     return null;
   }
   return resolved;

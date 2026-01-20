@@ -67,6 +67,16 @@ describe("serve", () => {
     expect(styleResponse.res.statusCode).toBe(200);
     expect(styleResponse.res.headers["content-type"]).toContain("text/css");
 
+    const sharedResponse = await collectResponse({
+      host: "127.0.0.1",
+      port: address.port,
+      path: "/shared/demo/demoSession.js"
+    });
+
+    expect(sharedResponse.res.statusCode).toBe(200);
+    expect(sharedResponse.res.headers["content-type"]).toContain("text/javascript");
+    expect(sharedResponse.data).toContain("createDemoSession");
+
     const missingResponse = await collectResponse({
       host: "127.0.0.1",
       port: address.port,
@@ -137,7 +147,10 @@ describe("serve", () => {
 
     const resolved = resolveAssetPath("/index.html");
     expect(resolved).toContain("client");
+    const sharedResolved = resolveAssetPath("/shared/demo/demoSession.js");
+    expect(sharedResolved).toContain("shared");
     expect(resolveAssetPath("/../secret")).toBeNull();
+    expect(resolveAssetPath("/shared/../client/index.html")).toBeNull();
     expect(resolveAssetPath("/%E0%A4%A")).toBeNull();
   });
 
