@@ -23,6 +23,16 @@ const normalizePositive = (value, label) => {
   return value;
 };
 
+const normalizeGeometryScale = (value) => {
+  if (value === undefined) {
+    return 1;
+  }
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new RangeError("scale must be a positive number");
+  }
+  return value;
+};
+
 export const createWeapon = ({
   id = "weapon",
   type,
@@ -53,6 +63,162 @@ export const createWeapon = ({
     mass: normalizedMass,
     length: normalizedLength,
     balance: normalizedBalance
+  };
+};
+
+const DEFAULT_WIDTH_RATIO = {
+  sword: 0.14,
+  dagger: 0.1,
+  mace: 0.2,
+  club: 0.22,
+  spear: 0.08,
+  halberd: 0.18,
+  greatsword: 0.2,
+  shield: 0.9
+};
+
+const scaleProfile = (profile, length, width) =>
+  profile.map((point) => ({
+    x: point.x * length,
+    y: point.y * (width / 2)
+  }));
+
+const createShieldProfile = (radius) => {
+  const points = [];
+  const sides = 8;
+  for (let i = 0; i < sides; i += 1) {
+    const angle = (Math.PI * 2 * i) / sides;
+    points.push({
+      x: radius + Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius
+    });
+  }
+  return points;
+};
+
+const getWeaponProfile = (type) => {
+  switch (type) {
+    case "dagger":
+      return [
+        { x: 0, y: 0.25 },
+        { x: 0.35, y: 0.25 },
+        { x: 0.4, y: 0.3 },
+        { x: 0.45, y: 0.18 },
+        { x: 1, y: 0.04 },
+        { x: 1, y: -0.04 },
+        { x: 0.45, y: -0.18 },
+        { x: 0.4, y: -0.3 },
+        { x: 0.35, y: -0.25 },
+        { x: 0, y: -0.25 }
+      ];
+    case "spear":
+      return [
+        { x: 0, y: 0.15 },
+        { x: 0.85, y: 0.15 },
+        { x: 0.9, y: 0.08 },
+        { x: 1, y: 0 },
+        { x: 0.9, y: -0.08 },
+        { x: 0.85, y: -0.15 },
+        { x: 0, y: -0.15 }
+      ];
+    case "mace":
+      return [
+        { x: 0, y: 0.2 },
+        { x: 0.7, y: 0.2 },
+        { x: 0.8, y: 0.35 },
+        { x: 0.95, y: 0.3 },
+        { x: 1, y: 0 },
+        { x: 0.95, y: -0.3 },
+        { x: 0.8, y: -0.35 },
+        { x: 0.7, y: -0.2 },
+        { x: 0, y: -0.2 }
+      ];
+    case "club":
+      return [
+        { x: 0, y: 0.22 },
+        { x: 0.65, y: 0.22 },
+        { x: 0.85, y: 0.4 },
+        { x: 1, y: 0.32 },
+        { x: 1, y: -0.32 },
+        { x: 0.85, y: -0.4 },
+        { x: 0.65, y: -0.22 },
+        { x: 0, y: -0.22 }
+      ];
+    case "halberd":
+      return [
+        { x: 0, y: 0.18 },
+        { x: 0.7, y: 0.18 },
+        { x: 0.82, y: 0.32 },
+        { x: 1, y: 0.1 },
+        { x: 0.95, y: 0 },
+        { x: 1, y: -0.1 },
+        { x: 0.82, y: -0.32 },
+        { x: 0.7, y: -0.18 },
+        { x: 0, y: -0.18 }
+      ];
+    case "greatsword":
+      return [
+        { x: 0, y: 0.3 },
+        { x: 0.3, y: 0.3 },
+        { x: 0.35, y: 0.45 },
+        { x: 0.45, y: 0.2 },
+        { x: 1, y: 0.08 },
+        { x: 1, y: -0.08 },
+        { x: 0.45, y: -0.2 },
+        { x: 0.35, y: -0.45 },
+        { x: 0.3, y: -0.3 },
+        { x: 0, y: -0.3 }
+      ];
+    case "sword":
+    default:
+      return [
+        { x: 0, y: 0.25 },
+        { x: 0.25, y: 0.25 },
+        { x: 0.3, y: 0.4 },
+        { x: 0.38, y: 0.18 },
+        { x: 1, y: 0.06 },
+        { x: 1, y: -0.06 },
+        { x: 0.38, y: -0.18 },
+        { x: 0.3, y: -0.4 },
+        { x: 0.25, y: -0.25 },
+        { x: 0, y: -0.25 }
+      ];
+  }
+};
+
+export const createWeaponGeometry = ({ weapon, scale } = {}) => {
+  if (!weapon || typeof weapon !== "object") {
+    throw new TypeError("weapon must be an object");
+  }
+  if (typeof weapon.type !== "string" || weapon.type.length === 0) {
+    throw new TypeError("weapon.type must be a non-empty string");
+  }
+  if (!WEAPON_TYPES.has(weapon.type)) {
+    throw new RangeError(`weapon type '${weapon.type}' is not supported`);
+  }
+  const length = normalizePositive(weapon.length, "length");
+  const resolvedScale = normalizeGeometryScale(scale);
+  const scaledLength = length * resolvedScale;
+
+  if (weapon.type === "shield") {
+    const radius = scaledLength / 2;
+    return {
+      type: weapon.type,
+      length: scaledLength,
+      width: scaledLength,
+      points: createShieldProfile(radius)
+    };
+  }
+
+  const widthRatio = DEFAULT_WIDTH_RATIO[weapon.type] ?? DEFAULT_WIDTH_RATIO.sword;
+  const width = scaledLength * widthRatio;
+  const profile = getWeaponProfile(weapon.type);
+
+  return {
+    type: weapon.type,
+    length: scaledLength,
+    width,
+    points: scaleProfile(profile, scaledLength, width)
   };
 };
 

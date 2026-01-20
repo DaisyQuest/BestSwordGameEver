@@ -1,4 +1,4 @@
-import { createWeapon } from "../combat/weaponSystem.js";
+import { createWeapon, createWeaponGeometry } from "../combat/weaponSystem.js";
 import { createSimulation } from "../simulation/simulationSystem.js";
 import { createLocomotionSystem } from "../simulation/locomotionSystem.js";
 import { createPlayerSystem } from "../simulation/playerSystem.js";
@@ -124,17 +124,26 @@ const buildWeaponLoadout = (weapons, ids) => {
   const playerSpec = normalizeWeaponConfig(resolved.player, "weapons.player");
   const rivalSpec = normalizeWeaponConfig(resolved.rival, "weapons.rival");
 
+  const withGeometry = (weapon) => ({
+    ...weapon,
+    geometry: createWeaponGeometry({ weapon })
+  });
+
   return {
-    player: createWeapon({
-      id: playerSpec.id ?? `${ids.player}-weapon`,
-      ...DEFAULT_WEAPON_SPECS.player,
-      ...playerSpec
-    }),
-    rival: createWeapon({
-      id: rivalSpec.id ?? `${ids.rival}-weapon`,
-      ...DEFAULT_WEAPON_SPECS.rival,
-      ...rivalSpec
-    })
+    player: withGeometry(
+      createWeapon({
+        id: playerSpec.id ?? `${ids.player}-weapon`,
+        ...DEFAULT_WEAPON_SPECS.player,
+        ...playerSpec
+      })
+    ),
+    rival: withGeometry(
+      createWeapon({
+        id: rivalSpec.id ?? `${ids.rival}-weapon`,
+        ...DEFAULT_WEAPON_SPECS.rival,
+        ...rivalSpec
+      })
+    )
   };
 };
 

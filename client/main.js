@@ -176,10 +176,33 @@ const drawWeapon = (center, scale, actor, weaponState, color) => {
   ctx.save();
   ctx.strokeStyle = pose.swinging ? "rgba(255, 214, 102, 0.9)" : color;
   ctx.lineWidth = pose.swinging ? 4 : 3;
-  ctx.beginPath();
-  ctx.moveTo(anchorPoint.x, anchorPoint.y);
-  ctx.lineTo(tipPoint.x, tipPoint.y);
-  ctx.stroke();
+
+  if (weapon.geometry?.points?.length) {
+    const points = weapon.geometry.points.map((point) => {
+      const rotated = {
+        x: anchor.x + Math.cos(pose.angle) * point.x - Math.sin(pose.angle) * point.y,
+        y: anchor.y + Math.sin(pose.angle) * point.x + Math.cos(pose.angle) * point.y,
+        z: handHeight + pose.swingPhase * 0.2
+      };
+      return projectPoint(rotated, center, scale);
+    });
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i += 1) {
+      ctx.lineTo(points[i].x, points[i].y);
+    }
+    ctx.closePath();
+    ctx.fillStyle = pose.swinging ? "rgba(255, 214, 102, 0.35)" : "rgba(255, 255, 255, 0.15)";
+    ctx.fill();
+    ctx.stroke();
+  } else {
+    ctx.beginPath();
+    ctx.moveTo(anchorPoint.x, anchorPoint.y);
+    ctx.lineTo(tipPoint.x, tipPoint.y);
+    ctx.stroke();
+  }
+
   ctx.restore();
 };
 

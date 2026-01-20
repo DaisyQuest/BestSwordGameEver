@@ -10,7 +10,7 @@ vi.mock("../shared/demo/demoSession.js", () => ({
   createDemoSession: () => mockSession
 }));
 
-const buildSnapshot = ({ exhausted = false, max = 100, posture, weapons = true } = {}) => ({
+const buildSnapshot = ({ exhausted = false, max = 100, posture, weapons = true, geometry = true } = {}) => ({
   arenaRadius: 10,
   player: {
     body: {
@@ -38,11 +38,17 @@ const buildSnapshot = ({ exhausted = false, max = 100, posture, weapons = true }
   weapons: weapons
     ? {
       player: {
-        weapon: { length: 1.2 },
+        weapon: {
+          length: 1.2,
+          geometry: geometry ? { points: [{ x: 0, y: 0.1 }, { x: 1, y: 0 }, { x: 0, y: -0.1 }] } : null
+        },
         pose: { angle: 0.3, swingPhase: 0.2, swinging: false }
       },
       rival: {
-        weapon: { length: 1.6 },
+        weapon: {
+          length: 1.6,
+          geometry: { points: [{ x: 0, y: 0.2 }, { x: 1.2, y: 0 }, { x: 0, y: -0.2 }] }
+        },
         pose: { angle: 1.4, swingPhase: 0.7, swinging: true }
       }
     }
@@ -56,6 +62,7 @@ const stubContext = () => ({
   beginPath: vi.fn(),
   arc: vi.fn(),
   ellipse: vi.fn(),
+  closePath: vi.fn(),
   stroke: vi.fn(),
   fill: vi.fn(),
   moveTo: vi.fn(),
@@ -114,7 +121,7 @@ describe("client main", () => {
     mockSession.step.mockImplementation(() => {
       stepCount += 1;
       if (stepCount === 1) {
-        return buildSnapshot({ exhausted: false, max: 100, weapons: false, posture: "stumbling" });
+        return buildSnapshot({ exhausted: false, max: 100, weapons: true, posture: "stumbling", geometry: false });
       }
       return buildSnapshot({ exhausted: true, max: 0, posture: "fallen" });
     });

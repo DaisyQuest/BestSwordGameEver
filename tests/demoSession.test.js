@@ -45,6 +45,8 @@ describe("demoSession", () => {
     expect(step.locomotion.player.limping).toBe(false);
     expect(step.weapons.player.weapon.type).toBe("sword");
     expect(step.weapons.rival.weapon.type).toBe("spear");
+    expect(step.weapons.player.weapon.geometry.points.length).toBeGreaterThan(3);
+    expect(step.weapons.rival.weapon.geometry.points.length).toBeGreaterThan(3);
 
     const rest = session.step(1000, [], { sprint: false });
     expect(rest.stamina.regenerated).toBeGreaterThan(0);
