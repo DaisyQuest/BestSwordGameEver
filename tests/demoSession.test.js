@@ -66,6 +66,21 @@ describe("demoSession", () => {
     expect(reset.player.model.stamina.current).toBe(10);
   });
 
+  it("restores spawn positions after reset", () => {
+    const session = createDemoSession({
+      arenaRadius: 6,
+      spawnOffset: 4,
+      stamina: { max: 20, current: 20 }
+    });
+
+    const moved = session.step(1000, [{ code: "KeyD", active: true }]);
+    expect(moved.player.body.position.x).not.toBeCloseTo(-4);
+
+    const reset = session.reset();
+    expect(reset.player.body.position.x).toBeCloseTo(-4);
+    expect(reset.rival.body.position.x).toBeCloseTo(4);
+  });
+
   it("covers helper utilities", () => {
     expect(normalizeStepOptions().sprint).toBe(false);
     expect(normalizeStepOptions(undefined).sprint).toBe(false);

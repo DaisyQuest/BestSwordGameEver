@@ -134,11 +134,11 @@ export const createDemoSession = ({
   const setupActors = () => {
     simulation.addActor({
       id: resolvedPlayerId,
-      body: { position: spawn.player, damping: 0.9, mass: 1 }
+      body: { position: { ...spawn.player }, damping: 0.9, mass: 1 }
     });
     simulation.addActor({
       id: resolvedRivalId,
-      body: { position: spawn.rival, damping: 0.9, mass: 1 }
+      body: { position: { ...spawn.rival }, damping: 0.9, mass: 1 }
     });
     playerSystem.addPlayer({ id: resolvedPlayerId });
     playerSystem.addPlayer({ id: resolvedRivalId, model: { dominantHand: "left" } });

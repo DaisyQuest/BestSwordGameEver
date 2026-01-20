@@ -83,20 +83,30 @@ export const createStaticServer = ({ port = DEFAULT_PORT, host = DEFAULT_HOST } 
   };
 };
 
+export const resolveCliOptions = ({ port, host } = {}) => ({
+  port: port ?? (process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT),
+  host: host ?? (process.env.HOST ?? DEFAULT_HOST)
+});
+
+export const formatServeAddress = (address, { host = DEFAULT_HOST, port = DEFAULT_PORT } = {}) => {
+  const resolvedHost = typeof address === "string" ? address : address?.address ?? host;
+  const resolvedPort = typeof address === "string" ? "" : address?.port ?? port;
+  const suffix = resolvedPort ? `:${resolvedPort}` : "";
+  return `http://${resolvedHost}${suffix}`;
+};
+
 export const runCliServer = ({
-  port = process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT,
-  host = process.env.HOST ?? DEFAULT_HOST,
+  port,
+  host,
   log = console.log,
   onSignal = (handler) => process.on("SIGINT", handler),
   exit = process.exit
 } = {}) => {
-  const { server, listen } = createStaticServer({ port, host });
+  const resolved = resolveCliOptions({ port, host });
+  const { server, listen } = createStaticServer(resolved);
 
   const ready = listen().then((address) => {
-    const resolvedHost = typeof address === "string" ? address : address?.address ?? DEFAULT_HOST;
-    const resolvedPort = typeof address === "string" ? "" : address?.port ?? DEFAULT_PORT;
-    const suffix = resolvedPort ? `:${resolvedPort}` : "";
-    log(`Serving demo at http://${resolvedHost}${suffix}`);
+    log(`Serving demo at ${formatServeAddress(address, resolved)}`);
     return address;
   });
 
@@ -118,6 +128,15 @@ export const isDirectRun = (metaUrl = import.meta.url, argv1 = process.argv[1]) 
   return metaUrl === pathToFileURL(argv1).href;
 };
 
-if (isDirectRun()) {
-  runCliServer();
-}
+export const maybeRunCliServer = ({
+  metaUrl = import.meta.url,
+  argv1 = process.argv[1],
+  run = runCliServer
+} = {}) => {
+  if (!isDirectRun(metaUrl, argv1)) {
+    return null;
+  }
+  return run();
+};
+
+maybeRunCliServer();
