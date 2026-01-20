@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const DEFAULT_PORT = 5173;
 const DEFAULT_HOST = "0.0.0.0";
@@ -83,22 +83,41 @@ export const createStaticServer = ({ port = DEFAULT_PORT, host = DEFAULT_HOST } 
   };
 };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const { server, listen } = createStaticServer({
-    port: process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT,
-    host: process.env.HOST ?? DEFAULT_HOST
+export const runCliServer = ({
+  port = process.env.PORT ? Number(process.env.PORT) : DEFAULT_PORT,
+  host = process.env.HOST ?? DEFAULT_HOST,
+  log = console.log,
+  onSignal = (handler) => process.on("SIGINT", handler),
+  exit = process.exit
+} = {}) => {
+  const { server, listen } = createStaticServer({ port, host });
+
+  const ready = listen().then((address) => {
+    const resolvedHost = typeof address === "string" ? address : address?.address ?? DEFAULT_HOST;
+    const resolvedPort = typeof address === "string" ? "" : address?.port ?? DEFAULT_PORT;
+    const suffix = resolvedPort ? `:${resolvedPort}` : "";
+    log(`Serving demo at http://${resolvedHost}${suffix}`);
+    return address;
   });
 
-  listen().then((address) => {
-    const host = typeof address === "string" ? address : address?.address ?? DEFAULT_HOST;
-    const port = typeof address === "string" ? "" : address?.port ?? DEFAULT_PORT;
-    const suffix = port ? `:${port}` : "";
-    console.log(`Serving demo at http://${host}${suffix}`);
-  });
-
-  process.on("SIGINT", () => {
+  const handleSigint = () => {
     server.close(() => {
-      process.exit(0);
+      exit(0);
     });
-  });
+  };
+
+  onSignal(handleSigint);
+
+  return { server, ready, handleSigint };
+};
+
+export const isDirectRun = (metaUrl = import.meta.url, argv1 = process.argv[1]) => {
+  if (!argv1) {
+    return false;
+  }
+  return metaUrl === pathToFileURL(argv1).href;
+};
+
+if (isDirectRun()) {
+  runCliServer();
 }

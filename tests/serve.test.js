@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { request } from "node:http";
-import { createStaticServer, getContentType, resolveAssetPath } from "../scripts/serve.js";
+import { pathToFileURL } from "node:url";
+import {
+  createStaticServer,
+  getContentType,
+  isDirectRun,
+  resolveAssetPath,
+  runCliServer
+} from "../scripts/serve.js";
 
 const collectResponse = (options) =>
   new Promise((resolvePromise) => {
@@ -116,5 +123,57 @@ describe("serve", () => {
 
     expect(res.statusCode).toBe(200);
     expect(data).toBe("");
+  });
+
+  it("detects direct runs across platforms", () => {
+    const entry = "/workspace/BestSwordGameEver/scripts/serve.js";
+    const metaUrl = pathToFileURL(entry).href;
+
+    expect(isDirectRun(metaUrl, entry)).toBe(true);
+    expect(isDirectRun(metaUrl, "/workspace/BestSwordGameEver/scripts/other.js")).toBe(false);
+    expect(isDirectRun(metaUrl, "C:\\workspace\\BestSwordGameEver\\scripts\\serve.js")).toBe(false);
+
+    const windowsEntry = "C:\\workspace\\BestSwordGameEver\\scripts\\serve.js";
+    const windowsMeta = pathToFileURL(windowsEntry).href;
+    expect(isDirectRun(windowsMeta, windowsEntry)).toBe(true);
+  });
+
+  it("returns false when argv is missing", () => {
+    expect(isDirectRun("file:///workspace/BestSwordGameEver/scripts/serve.js", undefined)).toBe(false);
+  });
+
+  it("runs the CLI server and exits on SIGINT", async () => {
+    let signalHandler;
+    let exitCode;
+    let resolveExit;
+    const logs = [];
+    const exitPromise = new Promise((resolvePromise) => {
+      resolveExit = resolvePromise;
+    });
+
+    const cliServer = runCliServer({
+      host: "127.0.0.1",
+      port: 0,
+      log: (message) => logs.push(message),
+      onSignal: (handler) => {
+        signalHandler = handler;
+      },
+      exit: (code) => {
+        exitCode = code;
+        resolveExit(code);
+      }
+    });
+    server = cliServer.server;
+
+    await cliServer.ready;
+
+    expect(signalHandler).toBeTypeOf("function");
+    expect(logs[0]).toMatch(/Serving demo at http:\/\/127\.0\.0\.1:\d+/);
+
+    signalHandler();
+    await exitPromise;
+    expect(exitCode).toBe(0);
+
+    server = null;
   });
 });
