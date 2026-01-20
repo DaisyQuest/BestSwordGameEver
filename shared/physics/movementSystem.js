@@ -26,6 +26,19 @@ const normalizeIntent = (intent) => {
   return { x, y };
 };
 
+const normalizeForceMultiplier = (value) => {
+  if (value === undefined) {
+    return 1;
+  }
+  if (value === null) {
+    return 1;
+  }
+  if (!Number.isFinite(value) || value < 0 || value > 1) {
+    throw new RangeError("forceMultiplier must be between 0 and 1");
+  }
+  return value;
+};
+
 export const createMovementController = ({
   maxAcceleration = 20,
   deadzone = 0.05,
@@ -35,10 +48,11 @@ export const createMovementController = ({
   const resolvedDeadzone = normalizeDeadzone(deadzone);
   const resolvedSprint = normalizePositive(sprintMultiplier, "sprintMultiplier");
 
-  const computeForce = (intent, { sprint = false } = {}) => {
+  const computeForce = (intent, { sprint = false, forceMultiplier } = {}) => {
     if (typeof sprint !== "boolean") {
       throw new TypeError("sprint must be boolean");
     }
+    const resolvedMultiplier = normalizeForceMultiplier(forceMultiplier);
 
     const move = normalizeIntent(intent);
     const magnitude = Math.hypot(move.x, move.y);
@@ -50,7 +64,7 @@ export const createMovementController = ({
     }
 
     const normalized = magnitude > 1 ? { x: move.x / magnitude, y: move.y / magnitude } : move;
-    const accel = resolvedMax * (sprint ? resolvedSprint : 1);
+    const accel = resolvedMax * (sprint ? resolvedSprint : 1) * resolvedMultiplier;
 
     return {
       applied: true,
