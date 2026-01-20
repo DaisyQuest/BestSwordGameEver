@@ -10,7 +10,7 @@ vi.mock("../shared/demo/demoSession.js", () => ({
   createDemoSession: () => mockSession
 }));
 
-const buildSnapshot = ({ exhausted = false, max = 100 } = {}) => ({
+const buildSnapshot = ({ exhausted = false, max = 100, posture, weapons = true } = {}) => ({
   arenaRadius: 10,
   player: {
     body: {
@@ -19,7 +19,7 @@ const buildSnapshot = ({ exhausted = false, max = 100 } = {}) => ({
     },
     model: {
       stamina: { max, current: exhausted ? 10 : 80, exhausted },
-      posture: exhausted ? "stumbling" : "steady"
+      posture: posture ?? (exhausted ? "stumbling" : "steady")
     }
   },
   rival: {
@@ -34,7 +34,19 @@ const buildSnapshot = ({ exhausted = false, max = 100 } = {}) => ({
   },
   intent: {
     move: { x: 0.5, y: 0.2 }
-  }
+  },
+  weapons: weapons
+    ? {
+      player: {
+        weapon: { length: 1.2 },
+        pose: { angle: 0.3, swingPhase: 0.2, swinging: false }
+      },
+      rival: {
+        weapon: { length: 1.6 },
+        pose: { angle: 1.4, swingPhase: 0.7, swinging: true }
+      }
+    }
+    : null
 });
 
 const stubContext = () => ({
@@ -43,6 +55,7 @@ const stubContext = () => ({
   fillRect: vi.fn(),
   beginPath: vi.fn(),
   arc: vi.fn(),
+  ellipse: vi.fn(),
   stroke: vi.fn(),
   fill: vi.fn(),
   moveTo: vi.fn(),
@@ -101,9 +114,9 @@ describe("client main", () => {
     mockSession.step.mockImplementation(() => {
       stepCount += 1;
       if (stepCount === 1) {
-        return buildSnapshot({ exhausted: false, max: 100 });
+        return buildSnapshot({ exhausted: false, max: 100, weapons: false, posture: "stumbling" });
       }
-      return buildSnapshot({ exhausted: true, max: 0 });
+      return buildSnapshot({ exhausted: true, max: 0, posture: "fallen" });
     });
 
     const { canvasContext, elements, handlers, rafCallbacks } = setupDom();
@@ -126,6 +139,7 @@ describe("client main", () => {
     expect(elements["#stamina-value"].textContent).toContain("/");
     expect(elements["#posture"].textContent.length).toBeGreaterThan(0);
     expect(canvasContext.arc).toHaveBeenCalled();
+    expect(canvasContext.ellipse).toHaveBeenCalled();
   });
 
   it("skips invalid frame deltas and schedules another frame", async () => {

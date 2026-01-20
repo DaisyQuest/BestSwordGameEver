@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { __testables, createDemoSession } from "../shared/demo/demoSession.js";
 
-const { buildRivalIntent, buildSpawnPositions, clampInsideArena, computeStaminaMultiplier, normalizeStepOptions } =
-  __testables;
+const {
+  buildRivalIntent,
+  buildSpawnPositions,
+  clampInsideArena,
+  computeStaminaMultiplier,
+  normalizeStepOptions,
+  buildWeaponLoadout,
+  computeWeaponPose,
+  buildWeaponState
+} = __testables;
 
 describe("demoSession", () => {
   it("validates configuration and ids", () => {
@@ -15,6 +23,7 @@ describe("demoSession", () => {
     expect(() => createDemoSession({ movement: [] })).toThrow(TypeError);
     expect(() => createDemoSession({ stamina: 2 })).toThrow(TypeError);
     expect(() => createDemoSession({ balance: "bad" })).toThrow(TypeError);
+    expect(() => createDemoSession({ locomotion: "nope" })).toThrow(TypeError);
   });
 
   it("steps the session and updates stamina + balance", () => {
@@ -32,6 +41,10 @@ describe("demoSession", () => {
     expect(step.intent.move.y).toBeGreaterThan(0);
     expect(step.stamina.drained).toBeGreaterThan(0);
     expect(step.balance.posture).toBeDefined();
+    expect(step.locomotion.player.forceMultiplier).toBeCloseTo(1);
+    expect(step.locomotion.player.limping).toBe(false);
+    expect(step.weapons.player.weapon.type).toBe("sword");
+    expect(step.weapons.rival.weapon.type).toBe("spear");
 
     const rest = session.step(1000, [], { sprint: false });
     expect(rest.stamina.regenerated).toBeGreaterThan(0);
@@ -107,6 +120,69 @@ describe("demoSession", () => {
 
     const rivalIntent = buildRivalIntent(0);
     expect(rivalIntent.move.x).toBeCloseTo(0.6);
+  });
+
+  it("builds weapons and weapon poses", () => {
+    const loadout = buildWeaponLoadout(
+      {
+        player: { type: "dagger", sharpness: 0.9, mass: 1, length: 0.5, balance: 0.8 },
+        rival: { type: "mace", sharpness: 0.1, mass: 4, length: 1.1, balance: 0.4 }
+      },
+      { player: "hero", rival: "rival" }
+    );
+    expect(loadout.player.type).toBe("dagger");
+    expect(loadout.rival.type).toBe("mace");
+
+    expect(() => buildWeaponLoadout("bad", { player: "hero", rival: "rival" })).toThrow(TypeError);
+    expect(() => buildWeaponLoadout({ player: "bad" }, { player: "hero", rival: "rival" })).toThrow(TypeError);
+
+    const pose = computeWeaponPose(1000, {
+      weapon: loadout.player,
+      dominantHand: "left",
+      phaseOffset: 0.5,
+      swingSpeed: 1,
+      swingArc: 0.5,
+      guardAngle: 0.2
+    });
+    expect(pose.dominantHand).toBe("left");
+    expect(pose.reach).toBeGreaterThan(0);
+    expect(pose.swinging).toBe(false);
+
+    const swingPose = computeWeaponPose(250, {
+      weapon: loadout.player,
+      dominantHand: "right",
+      phaseOffset: 0,
+      swingSpeed: 1,
+      swingArc: 0.5,
+      guardAngle: 0.2
+    });
+    expect(swingPose.swinging).toBe(true);
+
+    expect(() => computeWeaponPose(-1, { weapon: loadout.player })).toThrow(RangeError);
+    expect(() => computeWeaponPose(0, { weapon: null })).toThrow(TypeError);
+    expect(() => computeWeaponPose(0, { weapon: loadout.player, dominantHand: "both" })).toThrow(RangeError);
+    expect(() => computeWeaponPose(0, { weapon: loadout.player, swingSpeed: 10 })).toThrow(RangeError);
+    expect(() => computeWeaponPose(0, { weapon: loadout.player, swingArc: -1 })).toThrow(RangeError);
+    expect(() => computeWeaponPose(0, { weapon: loadout.player, guardAngle: 2 })).toThrow(RangeError);
+    expect(() => computeWeaponPose(0, { weapon: loadout.player, phaseOffset: 3 })).toThrow(RangeError);
+
+    const state = buildWeaponState({
+      weapon: loadout.rival,
+      model: { dominantHand: "right", stamina: { exhausted: true }, posture: "fallen" },
+      elapsedMs: 500
+    });
+    expect(state.pose.swinging).toBeTypeOf("boolean");
+    expect(state.pose.dominantHand).toBe("right");
+
+    const restedState = buildWeaponState({
+      weapon: loadout.player,
+      model: { dominantHand: "left", stamina: { exhausted: false }, posture: "steady" },
+      elapsedMs: 0
+    });
+    expect(restedState.pose.swinging).toBe(false);
+
+    expect(() => buildWeaponState({ weapon: null })).toThrow(TypeError);
+    expect(() => buildWeaponState({ weapon: loadout.player, model: null })).toThrow(TypeError);
   });
 
   it("validates deltaMs", () => {

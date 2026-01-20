@@ -68,44 +68,117 @@ const updateHud = (frame) => {
   intentEl.textContent = `${frame.intent.move.x.toFixed(1)}, ${frame.intent.move.y.toFixed(1)}`;
 };
 
-const drawGrid = (center, scale, radius) => {
+const projectPoint = (point, center, scale) => {
+  const isoX = (point.x - point.y) * 0.7;
+  const isoY = (point.x + point.y) * 0.35 - point.z * 0.75;
+  return {
+    x: center.x + isoX * scale,
+    y: center.y + isoY * scale
+  };
+};
+
+const getPostureHeight = (posture) => {
+  if (posture === "fallen") {
+    return 0.4;
+  }
+  if (posture === "stumbling") {
+    return 1.1;
+  }
+  return 1.5;
+};
+
+const drawArenaFloor = (center, scale, radius) => {
   ctx.save();
+  ctx.strokeStyle = "rgba(123, 242, 195, 0.35)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.ellipse(center.x, center.y + radius * scale * 0.12, radius * scale * 0.9, radius * scale * 0.5, 0, 0,
+    Math.PI * 2);
+  ctx.stroke();
+
   ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
   ctx.lineWidth = 1;
-  const spacing = scale;
-  for (let x = center.x - radius * scale; x <= center.x + radius * scale; x += spacing) {
+  const spacing = 2;
+  for (let x = -radius; x <= radius; x += spacing) {
+    const start = projectPoint({ x, y: -radius, z: 0 }, center, scale);
+    const end = projectPoint({ x, y: radius, z: 0 }, center, scale);
     ctx.beginPath();
-    ctx.moveTo(x, center.y - radius * scale);
-    ctx.lineTo(x, center.y + radius * scale);
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
     ctx.stroke();
   }
-  for (let y = center.y - radius * scale; y <= center.y + radius * scale; y += spacing) {
+  for (let y = -radius; y <= radius; y += spacing) {
+    const start = projectPoint({ x: -radius, y, z: 0 }, center, scale);
+    const end = projectPoint({ x: radius, y, z: 0 }, center, scale);
     ctx.beginPath();
-    ctx.moveTo(center.x - radius * scale, y);
-    ctx.lineTo(center.x + radius * scale, y);
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
     ctx.stroke();
   }
   ctx.restore();
 };
 
 const drawActor = (center, scale, actor, color) => {
-  const position = {
-    x: center.x + actor.body.position.x * scale,
-    y: center.y - actor.body.position.y * scale
-  };
+  const postureHeight = getPostureHeight(actor.model.posture);
+  const position = projectPoint(
+    { x: actor.body.position.x, y: actor.body.position.y, z: 0 },
+    center,
+    scale
+  );
+  const head = projectPoint(
+    { x: actor.body.position.x, y: actor.body.position.y, z: postureHeight },
+    center,
+    scale
+  );
+
   ctx.save();
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.beginPath();
+  ctx.ellipse(position.x, position.y + 6, 16, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(position.x, position.y);
+  ctx.lineTo(head.x, head.y);
+  ctx.stroke();
+
   ctx.fillStyle = color;
   ctx.shadowColor = color;
   ctx.shadowBlur = 12;
   ctx.beginPath();
-  ctx.arc(position.x, position.y, 14, 0, Math.PI * 2);
+  ctx.arc(head.x, head.y, 10, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+};
 
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.7)";
-  ctx.lineWidth = 3;
+const drawWeapon = (center, scale, actor, weaponState, color) => {
+  if (!weaponState) {
+    return;
+  }
+  const { weapon, pose } = weaponState;
+  const postureHeight = getPostureHeight(actor.model.posture);
+  const handHeight = postureHeight * 0.7;
+  const anchor = {
+    x: actor.body.position.x,
+    y: actor.body.position.y,
+    z: handHeight
+  };
+  const tip = {
+    x: anchor.x + Math.cos(pose.angle) * weapon.length,
+    y: anchor.y + Math.sin(pose.angle) * weapon.length,
+    z: handHeight + pose.swingPhase * 0.2
+  };
+
+  const anchorPoint = projectPoint(anchor, center, scale);
+  const tipPoint = projectPoint(tip, center, scale);
+  ctx.save();
+  ctx.strokeStyle = pose.swinging ? "rgba(255, 214, 102, 0.9)" : color;
+  ctx.lineWidth = pose.swinging ? 4 : 3;
   ctx.beginPath();
-  ctx.moveTo(position.x, position.y);
-  ctx.lineTo(position.x + 22, position.y - 12);
+  ctx.moveTo(anchorPoint.x, anchorPoint.y);
+  ctx.lineTo(tipPoint.x, tipPoint.y);
   ctx.stroke();
   ctx.restore();
 };
@@ -121,16 +194,10 @@ const render = (frame) => {
   ctx.fillStyle = "rgba(8, 10, 18, 0.85)";
   ctx.fillRect(0, 0, width, height);
 
-  drawGrid(center, scale, radius);
+  drawArenaFloor(center, scale, radius);
 
-  ctx.save();
-  ctx.strokeStyle = "rgba(123, 242, 195, 0.45)";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.arc(center.x, center.y, radius * scale, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.restore();
-
+  drawWeapon(center, scale, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.9)");
+  drawWeapon(center, scale, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.95)");
   drawActor(center, scale, frame.rival, "rgba(255, 143, 122, 0.9)");
   drawActor(center, scale, frame.player, "rgba(123, 242, 195, 0.95)");
 };
