@@ -136,7 +136,13 @@ const render = (frame) => {
 };
 
 const loop = (timestamp) => {
-  const deltaMs = Math.min(100, timestamp - lastTime);
+  const rawDelta = timestamp - lastTime;
+  if (!Number.isFinite(rawDelta) || rawDelta <= 0) {
+    lastTime = timestamp;
+    requestAnimationFrame(loop);
+    return;
+  }
+  const deltaMs = Math.min(100, rawDelta);
   lastTime = timestamp;
 
   state = session.step(deltaMs, buildInputs(), { sprint: wantsSprint() });

@@ -51,8 +51,50 @@ const stubContext = () => ({
   restore: vi.fn()
 });
 
+const setupDom = () => {
+  const handlers = {};
+  const canvasContext = stubContext();
+  const elements = {
+    "#arena": {
+      getContext: () => canvasContext,
+      getBoundingClientRect: () => ({ width: 960, height: 640 })
+    },
+    "#stamina-fill": { style: {} },
+    "#stamina-value": { textContent: "" },
+    "#posture": { textContent: "" },
+    "#speed": { textContent: "" },
+    "#intent": { textContent: "" },
+    "#reset": {
+      addEventListener: (event, handler) => {
+        handlers.click = handler;
+      }
+    }
+  };
+
+  globalThis.document = {
+    querySelector: (selector) => elements[selector]
+  };
+
+  const rafCallbacks = [];
+  globalThis.requestAnimationFrame = (callback) => {
+    rafCallbacks.push(callback);
+    return rafCallbacks.length;
+  };
+
+  globalThis.window = {
+    devicePixelRatio: 0,
+    addEventListener: (event, handler) => {
+      handlers[event] = handler;
+    }
+  };
+
+  return { canvasContext, elements, handlers, rafCallbacks };
+};
+
 describe("client main", () => {
   it("boots the demo UI and updates HUD", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
     let stepCount = 0;
     mockSession.getSnapshot.mockImplementation(() => buildSnapshot());
     mockSession.reset.mockImplementation(() => buildSnapshot({ exhausted: false }));
@@ -64,49 +106,15 @@ describe("client main", () => {
       return buildSnapshot({ exhausted: true, max: 0 });
     });
 
-    const handlers = {};
-    const canvasContext = stubContext();
-
-    const elements = {
-      "#arena": {
-        getContext: () => canvasContext,
-        getBoundingClientRect: () => ({ width: 960, height: 640 })
-      },
-      "#stamina-fill": { style: {} },
-      "#stamina-value": { textContent: "" },
-      "#posture": { textContent: "" },
-      "#speed": { textContent: "" },
-      "#intent": { textContent: "" },
-      "#reset": {
-        addEventListener: (event, handler) => {
-          handlers.click = handler;
-        }
-      }
-    };
-
-    globalThis.document = {
-      querySelector: (selector) => elements[selector]
-    };
-
-    const rafCallbacks = [];
-    globalThis.requestAnimationFrame = (callback) => {
-      rafCallbacks.push(callback);
-      return rafCallbacks.length;
-    };
-
-    globalThis.window = {
-      devicePixelRatio: 0,
-      addEventListener: (event, handler) => {
-        handlers[event] = handler;
-      }
-    };
+    const { canvasContext, elements, handlers, rafCallbacks } = setupDom();
 
     await import("../client/main.js");
 
+    const start = performance.now();
     handlers.keydown({ code: "ShiftRight" });
-    rafCallbacks.shift()(1000);
+    rafCallbacks.shift()(start + 16);
     handlers.keyup({ code: "ShiftRight" });
-    rafCallbacks.shift()(1100);
+    rafCallbacks.shift()(start + 32);
 
     handlers.keydown({ code: "KeyR" });
     handlers.keyup({ code: "ShiftLeft" });
@@ -117,5 +125,25 @@ describe("client main", () => {
     expect(elements["#stamina-value"].textContent).toContain("/");
     expect(elements["#posture"].textContent.length).toBeGreaterThan(0);
     expect(canvasContext.arc).toHaveBeenCalled();
+  });
+
+  it("skips invalid frame deltas and schedules another frame", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockSession.getSnapshot.mockImplementation(() => buildSnapshot());
+    mockSession.reset.mockImplementation(() => buildSnapshot({ exhausted: false }));
+    mockSession.step.mockImplementation(() => buildSnapshot());
+
+    globalThis.performance = { now: () => 1000 };
+    const { handlers, rafCallbacks } = setupDom();
+
+    await import("../client/main.js");
+
+    rafCallbacks.shift()(Number.NaN);
+
+    expect(mockSession.step).not.toHaveBeenCalled();
+    expect(typeof rafCallbacks[0]).toBe("function");
+    handlers.keydown({ code: "KeyR" });
+    expect(mockSession.reset).toHaveBeenCalled();
   });
 });
