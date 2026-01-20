@@ -1,3 +1,5 @@
+import { createStaminaState, snapshotStamina } from "./staminaModel.js";
+
 const LIMB_KEYS = ["leftArm", "rightArm", "leftLeg", "rightLeg"];
 const LIMB_STATUS_VALUES = ["healthy", "impaired", "severed"];
 
@@ -84,7 +86,13 @@ const getPostureFromBalance = (balance) => {
   return "steady";
 };
 
-export const createPlayerModel = ({ id = "player", limbs, balance, dominantHand = "right" } = {}) => {
+export const createPlayerModel = ({
+  id = "player",
+  limbs,
+  balance,
+  stamina,
+  dominantHand = "right"
+} = {}) => {
   if (typeof id !== "string" || id.length === 0) {
     throw new TypeError("id must be a non-empty string");
   }
@@ -100,6 +108,7 @@ export const createPlayerModel = ({ id = "player", limbs, balance, dominantHand 
     dominantHand,
     limbs: resolvedLimbs,
     balance: resolvedBalance,
+    stamina: createStaminaState(stamina),
     posture: getPostureFromBalance(resolvedBalance)
   };
 };
@@ -167,7 +176,7 @@ export const applyCombatReport = (model, report) => {
 };
 
 export const snapshotPlayerModel = (model) => {
-  if (!model || typeof model !== "object" || !model.limbs || !model.balance) {
+  if (!model || typeof model !== "object" || !model.limbs || !model.balance || !model.stamina) {
     throw new TypeError("model must be a player model");
   }
   return {
@@ -175,6 +184,7 @@ export const snapshotPlayerModel = (model) => {
     dominantHand: model.dominantHand,
     posture: model.posture,
     balance: { ...model.balance },
+    stamina: snapshotStamina(model.stamina),
     limbs: Object.fromEntries(
       LIMB_KEYS.map((key) => [key, { ...model.limbs[key] }])
     )

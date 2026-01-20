@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Best Sword Game Ever - Demo Arena</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Best Sword Game Ever</p>
+          <h1>Training Grounds Demo</h1>
+          <p class="subhead">
+            Dance with your sparring partner, manage stamina, and stay balanced inside the arena.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="reset" type="button">Reset Match</button>
+          <div class="hint">Tip: Hold <span>Shift</span> to sprint</div>
+        </div>
+      </header>
+
+      <main class="stage">
+        <section class="canvas-shell">
+          <canvas id="arena" width="960" height="640"></canvas>
+          <div class="arena-glow"></div>
+        </section>
+        <aside class="hud">
+          <div class="hud-card">
+            <h2>Hero Status</h2>
+            <div class="bar">
+              <div class="bar-label">Stamina</div>
+              <div class="bar-track">
+                <div class="bar-fill" id="stamina-fill"></div>
+              </div>
+              <div class="bar-value" id="stamina-value">--</div>
+            </div>
+            <div class="stat-grid">
+              <div>
+                <p class="stat-label">Posture</p>
+                <p class="stat-value" id="posture">steady</p>
+              </div>
+              <div>
+                <p class="stat-label">Speed</p>
+                <p class="stat-value" id="speed">0</p>
+              </div>
+              <div>
+                <p class="stat-label">Intent</p>
+                <p class="stat-value" id="intent">idle</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="hud-card">
+            <h2>How to Play</h2>
+            <ul>
+              <li><strong>WASD</strong> to move around the arena.</li>
+              <li><strong>Shift</strong> to sprint (watch your stamina).</li>
+              <li><strong>R</strong> or the reset button to restart.</li>
+            </ul>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

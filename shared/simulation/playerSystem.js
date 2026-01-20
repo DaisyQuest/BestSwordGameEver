@@ -1,5 +1,6 @@
 import { createBalanceSystem } from "../physics/balanceSystem.js";
 import { applyCombatReport, createPlayerModel, snapshotPlayerModel } from "./playerModel.js";
+import { updateStamina } from "./staminaModel.js";
 
 const normalizeId = (id) => {
   if (typeof id !== "string" || id.length === 0) {
@@ -57,6 +58,15 @@ export const createPlayerSystem = ({ balance = {}, modelDefaults = {} } = {}) =>
     return applyCombatReport(player.model, report);
   };
 
+  const updatePlayerStamina = (playerId, options) => {
+    const resolvedOptions = normalizeOptions(options);
+    const player = getPlayer(playerId);
+    if (!player) {
+      throw new RangeError(`player '${playerId}' not found`);
+    }
+    return updateStamina(player.model.stamina, resolvedOptions);
+  };
+
   const updateBalance = (world, bodyId, playerId, options) => {
     const resolvedOptions = normalizeOptions(options);
     const player = getPlayer(playerId);
@@ -100,6 +110,7 @@ export const createPlayerSystem = ({ balance = {}, modelDefaults = {} } = {}) =>
     getPlayer,
     removePlayer,
     applyDamageReport,
+    updateStamina: updatePlayerStamina,
     updateBalance,
     snapshotPlayer,
     balanceSystem
