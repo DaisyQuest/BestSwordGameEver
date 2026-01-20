@@ -122,4 +122,15 @@ describe("balanceSystem", () => {
 
     expect(report.posture).toBe("steady");
   });
+
+  it("computes limb-based force multipliers", () => {
+    const model = createPlayerModel();
+    const balanceSystem = createBalanceSystem();
+
+    expect(balanceSystem.computeForceMultiplier(model)).toBeCloseTo(1);
+    updateLimbStatus(model, "leftLeg", "impaired");
+    updateLimbStatus(model, "rightLeg", "severed");
+    expect(balanceSystem.computeForceMultiplier(model)).toBeCloseTo(0.28);
+    expect(() => balanceSystem.computeForceMultiplier()).toThrow(TypeError);
+  });
 });

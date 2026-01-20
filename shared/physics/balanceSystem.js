@@ -99,6 +99,26 @@ export const createBalanceSystem = ({
   const resolvedImpactThreshold = normalizeRate(impactThreshold, "impactThreshold");
   const resolvedImpactStress = normalizePenalty(impactStress, "impactStress");
 
+  const computeForceMultiplier = (model) => {
+    if (!model || typeof model !== "object" || !model.limbs) {
+      throw new TypeError("model must include limbs");
+    }
+    let total = 1;
+    for (const limbKey of getLimbKeys()) {
+      const limb = model.limbs[limbKey];
+      if (!limb) {
+        continue;
+      }
+      const status = limb.status;
+      if (status === "severed") {
+        total *= 0.4;
+      } else if (status === "impaired") {
+        total *= 0.7;
+      }
+    }
+    return clamp01(total);
+  };
+
   const applyBalance = (world, bodyId, model, { deltaMs, shock = 0, previousVelocity } = {}) => {
     if (!world || typeof world.getBody !== "function") {
       throw new TypeError("world must expose getBody");
@@ -163,6 +183,7 @@ export const createBalanceSystem = ({
   };
 
   return {
-    applyBalance
+    applyBalance,
+    computeForceMultiplier
   };
 };

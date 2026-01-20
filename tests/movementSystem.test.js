@@ -30,12 +30,24 @@ describe("movementSystem", () => {
     expect(sprint.force.x).toBeCloseTo(20);
   });
 
+  it("scales force with forceMultiplier", () => {
+    const controller = createMovementController({ maxAcceleration: 10 });
+    const scaled = controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: 0.5 });
+    expect(scaled.force.x).toBeCloseTo(5);
+
+    const defaultMultiplier = controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: null });
+    expect(defaultMultiplier.force.x).toBeCloseTo(10);
+  });
+
   it("validates intent and sprint options", () => {
     const controller = createMovementController();
     expect(() => controller.computeForce()).toThrow(TypeError);
     expect(() => controller.computeForce({})).toThrow(TypeError);
     expect(() => controller.computeForce({ move: { x: "1", y: 0 } })).toThrow(RangeError);
     expect(() => controller.computeForce({ move: { x: 1, y: 0 } }, { sprint: "yes" })).toThrow(TypeError);
+    expect(() =>
+      controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: 2 })
+    ).toThrow(RangeError);
   });
 
   it("applies forces through a physics world", () => {
