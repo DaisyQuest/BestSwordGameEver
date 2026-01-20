@@ -17,6 +17,9 @@ describe("playerModel", () => {
     expect(() => createPlayerModel({ balance: { fallThreshold: 0.9, stumbleThreshold: 0.2 } })).toThrow(
       RangeError
     );
+    expect(() => createPlayerModel({ stamina: "nope" })).toThrow(TypeError);
+    expect(() => createPlayerModel({ stamina: { max: -1 } })).toThrow(RangeError);
+    expect(() => createPlayerModel({ stamina: { max: 20, current: 40 } })).toThrow(RangeError);
     expect(() =>
       createPlayerModel({
         limbs: { leftArm: { status: "healthy", integrity: 2 } }
@@ -98,10 +101,13 @@ describe("playerModel", () => {
       dominantHand: "left",
       posture: "steady",
       balance: model.balance,
+      stamina: model.stamina,
       limbs: model.limbs
     });
+    snapshot.stamina.current = 0;
     snapshot.limbs.leftArm.status = "severed";
     expect(model.limbs.leftArm.status).toBe("healthy");
+    expect(model.stamina.current).toBeGreaterThan(0);
 
     expect(getLimbKeys()).toEqual(["leftArm", "rightArm", "leftLeg", "rightLeg"]);
   });

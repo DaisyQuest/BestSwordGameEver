@@ -34,6 +34,24 @@ describe("playerSystem", () => {
     expect(system.getPlayer("hero").model.limbs.leftArm.integrity).toBe(0);
   });
 
+  it("updates player stamina over time", () => {
+    const system = createPlayerSystem({
+      modelDefaults: { stamina: { max: 100, current: 30, regenRate: 10, sprintCost: 20 } }
+    });
+    system.addPlayer({ id: "hero" });
+
+    expect(() => system.updateStamina("missing", { deltaMs: 16 })).toThrow(RangeError);
+    expect(() => system.updateStamina("hero", "nope")).toThrow(TypeError);
+
+    const sprint = system.updateStamina("hero", { deltaMs: 1000, sprinting: true });
+    expect(sprint.current).toBe(10);
+    expect(system.getPlayer("hero").model.stamina.exhausted).toBe(true);
+
+    const rest = system.updateStamina("hero", { deltaMs: 1000 });
+    expect(rest.regenerated).toBe(10);
+    expect(system.getPlayer("hero").model.stamina.exhausted).toBe(false);
+  });
+
   it("updates balance and tracks velocity", () => {
     const world = createPhysicsWorld({ gravity: { x: 0, y: 0 } });
     world.createBody({ id: "hero", velocity: { x: 2, y: 0 }, damping: 1 });
@@ -78,7 +96,9 @@ describe("playerSystem", () => {
     const snapshot = system.snapshotPlayer("hero");
     snapshot.model.limbs.leftArm.status = "severed";
     snapshot.lastVelocity.x = 0;
+    snapshot.model.stamina.current = 0;
     expect(player.model.limbs.leftArm.status).toBe("healthy");
+    expect(player.model.stamina.current).toBe(100);
     expect(player.lastVelocity.x).toBe(5);
 
     expect(() => system.snapshotPlayer("missing")).toThrow(RangeError);
