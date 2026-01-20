@@ -111,6 +111,7 @@ describe("client main", () => {
     await import("../client/main.js");
 
     const start = performance.now();
+    rafCallbacks.shift()(start);
     handlers.keydown({ code: "ShiftRight" });
     rafCallbacks.shift()(start + 16);
     handlers.keyup({ code: "ShiftRight" });
@@ -140,10 +141,15 @@ describe("client main", () => {
     await import("../client/main.js");
 
     rafCallbacks.shift()(Number.NaN);
+    rafCallbacks.shift()(1000);
+    rafCallbacks.shift()(999);
 
     expect(mockSession.step).not.toHaveBeenCalled();
     expect(typeof rafCallbacks[0]).toBe("function");
     handlers.keydown({ code: "KeyR" });
     expect(mockSession.reset).toHaveBeenCalled();
+
+    rafCallbacks.shift()(1016);
+    expect(mockSession.step).toHaveBeenCalled();
   });
 });

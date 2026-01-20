@@ -17,7 +17,7 @@ const session = createDemoSession({
 });
 
 const inputState = new Set();
-let lastTime = performance.now();
+let lastTime = null;
 let state = session.getSnapshot();
 
 const resizeCanvas = () => {
@@ -136,6 +136,15 @@ const render = (frame) => {
 };
 
 const loop = (timestamp) => {
+  if (!Number.isFinite(timestamp)) {
+    requestAnimationFrame(loop);
+    return;
+  }
+  if (lastTime === null) {
+    lastTime = timestamp;
+    requestAnimationFrame(loop);
+    return;
+  }
   const rawDelta = timestamp - lastTime;
   if (!Number.isFinite(rawDelta) || rawDelta <= 0) {
     lastTime = timestamp;
