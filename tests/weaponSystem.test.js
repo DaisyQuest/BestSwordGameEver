@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeWeaponImpact, createWeapon } from "../shared/combat/weaponSystem.js";
+import { computeWeaponImpact, createWeapon, createWeaponGeometry } from "../shared/combat/weaponSystem.js";
 
 describe("weaponSystem", () => {
   it("validates weapon creation inputs", () => {
@@ -82,5 +82,42 @@ describe("weaponSystem", () => {
     expect(() => computeWeaponImpact({ weapon, velocity: 1, attackType: "blunt", weakPoint: "yes" })).toThrow(
       TypeError
     );
+  });
+
+  it("builds deterministic weapon geometry", () => {
+    const weapon = createWeapon({
+      id: "spear-1",
+      type: "spear",
+      sharpness: 0.4,
+      mass: 3,
+      length: 2,
+      balance: 0.4
+    });
+    const geometry = createWeaponGeometry({ weapon });
+    expect(geometry.type).toBe("spear");
+    expect(geometry.length).toBeCloseTo(2);
+    expect(geometry.width).toBeGreaterThan(0);
+    expect(geometry.points.length).toBeGreaterThan(4);
+
+    const scaled = createWeaponGeometry({ weapon, scale: 2 });
+    expect(scaled.length).toBeCloseTo(4);
+
+    const shield = createWeaponGeometry({
+      weapon: createWeapon({
+        id: "shield-1",
+        type: "shield",
+        sharpness: 0,
+        mass: 5,
+        length: 1,
+        balance: 0.2
+      })
+    });
+    expect(shield.points.length).toBe(8);
+    expect(shield.width).toBeCloseTo(1);
+
+    expect(() => createWeaponGeometry()).toThrow(TypeError);
+    expect(() => createWeaponGeometry({ weapon: { type: "" } })).toThrow(TypeError);
+    expect(() => createWeaponGeometry({ weapon: { type: "laser", length: 1 } })).toThrow(RangeError);
+    expect(() => createWeaponGeometry({ weapon, scale: 0 })).toThrow(RangeError);
   });
 });
