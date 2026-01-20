@@ -8,6 +8,7 @@ const staminaValue = document.querySelector("#stamina-value");
 const postureEl = document.querySelector("#posture");
 const speedEl = document.querySelector("#speed");
 const intentEl = document.querySelector("#intent");
+const motionEl = document.querySelector("#motion");
 const resetButton = document.querySelector("#reset");
 
 const session = createDemoSession({
@@ -19,6 +20,7 @@ const session = createDemoSession({
 const inputState = new Set();
 let lastTime = null;
 let state = session.getSnapshot();
+let reducedMotion = false;
 
 const resizeCanvas = () => {
   const { width, height } = canvas.getBoundingClientRect();
@@ -29,6 +31,12 @@ const resizeCanvas = () => {
 };
 
 const handleKey = (event, active) => {
+  if (event.code === "KeyM") {
+    if (active) {
+      reducedMotion = !reducedMotion;
+    }
+    return;
+  }
   if (active) {
     inputState.add(event.code);
   } else {
@@ -66,11 +74,26 @@ const updateHud = (frame) => {
   postureEl.textContent = frame.player.model.posture;
   speedEl.textContent = frame.speed.toFixed(1);
   intentEl.textContent = `${frame.intent.move.x.toFixed(1)}, ${frame.intent.move.y.toFixed(1)}`;
+  motionEl.textContent = reducedMotion ? "Reduced" : "Full";
 };
 
-const projectPoint = (point, center, scale) => {
-  const isoX = (point.x - point.y) * 0.7;
-  const isoY = (point.x + point.y) * 0.35 - point.z * 0.75;
+const computeCameraFocus = (frame) => ({
+  x: (frame.player.body.position.x + frame.rival.body.position.x) / 2,
+  y: (frame.player.body.position.y + frame.rival.body.position.y) / 2
+});
+
+const computeViewportCenter = (width, height) => ({
+  x: width / 2,
+  y: height * 0.58
+});
+
+const computeViewportScale = (width, height, radius) => Math.min(width, height) / (radius * 2);
+
+const projectPoint = (point, center, scale, focus) => {
+  const relativeX = point.x - focus.x;
+  const relativeY = point.y - focus.y;
+  const isoX = (relativeX - relativeY) * 0.7;
+  const isoY = (relativeX + relativeY) * 0.35 - point.z * 0.75;
   return {
     x: center.x + isoX * scale,
     y: center.y + isoY * scale
@@ -87,29 +110,37 @@ const getPostureHeight = (posture) => {
   return 1.5;
 };
 
-const drawArenaFloor = (center, scale, radius) => {
+const drawArenaFloor = (center, scale, radius, focus) => {
+  const floorCenter = projectPoint({ x: 0, y: 0, z: 0 }, center, scale, focus);
   ctx.save();
   ctx.strokeStyle = "rgba(123, 242, 195, 0.35)";
   ctx.lineWidth = 3;
   ctx.beginPath();
-  ctx.ellipse(center.x, center.y + radius * scale * 0.12, radius * scale * 0.9, radius * scale * 0.5, 0, 0,
-    Math.PI * 2);
+  ctx.ellipse(
+    floorCenter.x,
+    floorCenter.y + radius * scale * 0.12,
+    radius * scale * 0.9,
+    radius * scale * 0.5,
+    0,
+    0,
+    Math.PI * 2
+  );
   ctx.stroke();
 
   ctx.strokeStyle = "rgba(255, 255, 255, 0.04)";
   ctx.lineWidth = 1;
   const spacing = 2;
   for (let x = -radius; x <= radius; x += spacing) {
-    const start = projectPoint({ x, y: -radius, z: 0 }, center, scale);
-    const end = projectPoint({ x, y: radius, z: 0 }, center, scale);
+    const start = projectPoint({ x, y: -radius, z: 0 }, center, scale, focus);
+    const end = projectPoint({ x, y: radius, z: 0 }, center, scale, focus);
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
   }
   for (let y = -radius; y <= radius; y += spacing) {
-    const start = projectPoint({ x: -radius, y, z: 0 }, center, scale);
-    const end = projectPoint({ x: radius, y, z: 0 }, center, scale);
+    const start = projectPoint({ x: -radius, y, z: 0 }, center, scale, focus);
+    const end = projectPoint({ x: radius, y, z: 0 }, center, scale, focus);
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
@@ -118,17 +149,19 @@ const drawArenaFloor = (center, scale, radius) => {
   ctx.restore();
 };
 
-const drawActor = (center, scale, actor, color) => {
+const drawActor = (center, scale, focus, actor, color, { glow = 12 } = {}) => {
   const postureHeight = getPostureHeight(actor.model.posture);
   const position = projectPoint(
     { x: actor.body.position.x, y: actor.body.position.y, z: 0 },
     center,
-    scale
+    scale,
+    focus
   );
   const head = projectPoint(
     { x: actor.body.position.x, y: actor.body.position.y, z: postureHeight },
     center,
-    scale
+    scale,
+    focus
   );
 
   ctx.save();
@@ -146,33 +179,35 @@ const drawActor = (center, scale, actor, color) => {
 
   ctx.fillStyle = color;
   ctx.shadowColor = color;
-  ctx.shadowBlur = 12;
+  ctx.shadowBlur = glow;
   ctx.beginPath();
   ctx.arc(head.x, head.y, 10, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 };
 
-const drawWeapon = (center, scale, actor, weaponState, color) => {
+const drawWeapon = (center, scale, focus, actor, weaponState, color) => {
   if (!weaponState) {
     return;
   }
   const { weapon, pose } = weaponState;
   const postureHeight = getPostureHeight(actor.model.posture);
   const handHeight = postureHeight * 0.7;
+  const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
+  const geometryScale = weapon.length > 0 ? reach / weapon.length : 1;
   const anchor = {
     x: actor.body.position.x,
     y: actor.body.position.y,
     z: handHeight
   };
   const tip = {
-    x: anchor.x + Math.cos(pose.angle) * weapon.length,
-    y: anchor.y + Math.sin(pose.angle) * weapon.length,
+    x: anchor.x + Math.cos(pose.angle) * reach,
+    y: anchor.y + Math.sin(pose.angle) * reach,
     z: handHeight + pose.swingPhase * 0.2
   };
 
-  const anchorPoint = projectPoint(anchor, center, scale);
-  const tipPoint = projectPoint(tip, center, scale);
+  const anchorPoint = projectPoint(anchor, center, scale, focus);
+  const tipPoint = projectPoint(tip, center, scale, focus);
   ctx.save();
   ctx.strokeStyle = pose.swinging ? "rgba(255, 214, 102, 0.9)" : color;
   ctx.lineWidth = pose.swinging ? 4 : 3;
@@ -180,11 +215,11 @@ const drawWeapon = (center, scale, actor, weaponState, color) => {
   if (weapon.geometry?.points?.length) {
     const points = weapon.geometry.points.map((point) => {
       const rotated = {
-        x: anchor.x + Math.cos(pose.angle) * point.x - Math.sin(pose.angle) * point.y,
-        y: anchor.y + Math.sin(pose.angle) * point.x + Math.cos(pose.angle) * point.y,
+        x: anchor.x + Math.cos(pose.angle) * point.x * geometryScale - Math.sin(pose.angle) * point.y * geometryScale,
+        y: anchor.y + Math.sin(pose.angle) * point.x * geometryScale + Math.cos(pose.angle) * point.y * geometryScale,
         z: handHeight + pose.swingPhase * 0.2
       };
-      return projectPoint(rotated, center, scale);
+      return projectPoint(rotated, center, scale, focus);
     });
 
     ctx.beginPath();
@@ -210,19 +245,22 @@ const render = (frame) => {
   const { width, height } = canvas.getBoundingClientRect();
   ctx.clearRect(0, 0, width, height);
 
-  const center = { x: width / 2, y: height / 2 };
+  const center = computeViewportCenter(width, height);
   const radius = frame.arenaRadius;
-  const scale = Math.min(width, height) / (radius * 2.4);
+  const baseScale = computeViewportScale(width, height, radius);
+  const scale = reducedMotion ? baseScale * 0.9 : baseScale;
+  const focus = reducedMotion ? { x: 0, y: 0 } : computeCameraFocus(frame);
+  const glow = reducedMotion ? 0 : 12;
 
   ctx.fillStyle = "rgba(8, 10, 18, 0.85)";
   ctx.fillRect(0, 0, width, height);
 
-  drawArenaFloor(center, scale, radius);
+  drawArenaFloor(center, scale, radius, focus);
 
-  drawWeapon(center, scale, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.9)");
-  drawWeapon(center, scale, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.95)");
-  drawActor(center, scale, frame.rival, "rgba(255, 143, 122, 0.9)");
-  drawActor(center, scale, frame.player, "rgba(123, 242, 195, 0.95)");
+  drawWeapon(center, scale, focus, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.9)");
+  drawWeapon(center, scale, focus, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.95)");
+  drawActor(center, scale, focus, frame.rival, "rgba(255, 143, 122, 0.9)", { glow });
+  drawActor(center, scale, focus, frame.player, "rgba(123, 242, 195, 0.95)", { glow });
 };
 
 const loop = (timestamp) => {
