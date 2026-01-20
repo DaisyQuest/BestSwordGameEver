@@ -17,9 +17,9 @@
 
 ## 2. Core Engine Architecture
 ### 2.1 Modular System Framework
-- [ ] Create dependency-injection container for modular systems.
-- [ ] Implement feature toggle manager (config + runtime toggles).
-- [ ] Create system lifecycle (`init`, `update`, `shutdown`) interface.
+- [x] Create dependency-injection container for modular systems.
+- [x] Implement feature toggle manager (config + runtime toggles).
+- [x] Create system lifecycle (`init`, `update`, `shutdown`) interface.
 
 ### 2.2 Deterministic Simulation Core
 - [ ] Fixed timestep loop with deterministic scheduling.
@@ -124,9 +124,9 @@
 
 ## 10. NPC & AI
 - [ ] NPC entity type with same physics pipeline as players.
-- [ ] Pluggable AI brain interface.
+- [x] Pluggable AI brain interface.
 - [ ] Difficulty scaling parameters (reaction time, aggression, prediction).
-- [ ] AI test suite with deterministic scenarios.
+- [x] AI test suite with deterministic scenarios.
 
 ---
 
