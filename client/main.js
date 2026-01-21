@@ -3,8 +3,12 @@ import { createDemoSession } from "../shared/demo/demoSession.js";
 const canvas = document.querySelector("#arena");
 const ctx = canvas.getContext("2d");
 
+const healthFill = document.querySelector("#health-fill");
+const healthValue = document.querySelector("#health-value");
 const staminaFill = document.querySelector("#stamina-fill");
 const staminaValue = document.querySelector("#stamina-value");
+const rivalHealthFill = document.querySelector("#rival-health-fill");
+const rivalHealthValue = document.querySelector("#rival-health-value");
 const postureEl = document.querySelector("#posture");
 const speedEl = document.querySelector("#speed");
 const intentEl = document.querySelector("#intent");
@@ -139,6 +143,18 @@ const buildInputs = () =>
 const wantsSprint = () => inputState.has("ShiftLeft") || inputState.has("ShiftRight");
 
 const updateHud = (frame) => {
+  if (frame.health?.player && healthFill && healthValue) {
+    const playerHealth = frame.health.player;
+    const ratio = playerHealth.max > 0 ? playerHealth.current / playerHealth.max : 0;
+    healthFill.style.width = `${Math.round(ratio * 100)}%`;
+    healthValue.textContent = `${Math.round(playerHealth.current)} / ${playerHealth.max}`;
+  }
+  if (frame.health?.rival && rivalHealthFill && rivalHealthValue) {
+    const rivalHealth = frame.health.rival;
+    const ratio = rivalHealth.max > 0 ? rivalHealth.current / rivalHealth.max : 0;
+    rivalHealthFill.style.width = `${Math.round(ratio * 100)}%`;
+    rivalHealthValue.textContent = `${Math.round(rivalHealth.current)} / ${rivalHealth.max}`;
+  }
   const stamina = frame.player.model.stamina;
   const ratio = stamina.max > 0 ? stamina.current / stamina.max : 0;
   staminaFill.style.width = `${Math.round(ratio * 100)}%`;
@@ -172,31 +188,76 @@ const updateHud = (frame) => {
 };
 
 const CAMERA_PROFILE = {
-  focusAheadRatio: 0.7,
-  shoulderOffset: 1.1,
-  centerBiasX: 0.52,
-  centerBiasY: 0.62,
-  zoomScale: 1.38
+  followDistance: 5.2,
+  shoulderOffset: 1.3,
+  height: 2.6,
+  lookAhead: 3.2,
+  centerBiasX: 0.5,
+  centerBiasY: 0.7,
+  zoomScale: 1.2,
+  fov: 6.5
 };
 
-const computeCameraFocus = (frame) => {
+const normalize2d = (vector) => {
+  const length = Math.hypot(vector.x, vector.y);
+  if (length <= 0) {
+    return { x: 1, y: 0 };
+  }
+  return { x: vector.x / length, y: vector.y / length };
+};
+
+const normalize3d = (vector) => {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (length <= 0) {
+    return { x: 0, y: 0, z: 1 };
+  }
+  return { x: vector.x / length, y: vector.y / length, z: vector.z / length };
+};
+
+const cross = (a, b) => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x
+});
+
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
+const computeCameraRig = (frame) => {
   const toRival = {
     x: frame.rival.body.position.x - frame.player.body.position.x,
     y: frame.rival.body.position.y - frame.player.body.position.y
   };
-  const distance = Math.hypot(toRival.x, toRival.y) || 1;
-  const direction = { x: toRival.x / distance, y: toRival.y / distance };
+  const direction = normalize2d(toRival);
   const shoulder = { x: -direction.y, y: direction.x };
-  const focusDistance = distance * CAMERA_PROFILE.focusAheadRatio;
-  return {
+  const position = {
     x:
-      frame.player.body.position.x +
-      direction.x * focusDistance +
+      frame.player.body.position.x -
+      direction.x * CAMERA_PROFILE.followDistance +
       shoulder.x * CAMERA_PROFILE.shoulderOffset,
     y:
-      frame.player.body.position.y +
-      direction.y * focusDistance +
-      shoulder.y * CAMERA_PROFILE.shoulderOffset
+      frame.player.body.position.y -
+      direction.y * CAMERA_PROFILE.followDistance +
+      shoulder.y * CAMERA_PROFILE.shoulderOffset,
+    z: CAMERA_PROFILE.height
+  };
+  const lookAt = {
+    x: frame.player.body.position.x + direction.x * CAMERA_PROFILE.lookAhead,
+    y: frame.player.body.position.y + direction.y * CAMERA_PROFILE.lookAhead,
+    z: CAMERA_PROFILE.height * 0.45
+  };
+  const forward = normalize3d({
+    x: lookAt.x - position.x,
+    y: lookAt.y - position.y,
+    z: lookAt.z - position.z
+  });
+  const worldUp = { x: 0, y: 0, z: 1 };
+  const right = normalize3d(cross(forward, worldUp));
+  const up = cross(right, forward);
+  return {
+    position,
+    forward,
+    right,
+    up
   };
 };
 
@@ -208,27 +269,45 @@ const computeViewportCenter = (width, height) => ({
 const computeViewportScale = (width, height, radius) =>
   (Math.min(width, height) / (radius * 2)) * CAMERA_PROFILE.zoomScale;
 
-const projectPoint = (point, center, scale, focus) => {
-  const relativeX = point.x - focus.x;
-  const relativeY = point.y - focus.y;
-  const isoX = (relativeX - relativeY) * 0.7;
-  const isoY = (relativeX + relativeY) * 0.35 - point.z * 0.75;
+const projectPoint = (point, center, scale, camera) => {
+  const relative = {
+    x: point.x - camera.position.x,
+    y: point.y - camera.position.y,
+    z: point.z - camera.position.z
+  };
+  const cameraX = dot(relative, camera.right);
+  const cameraY = dot(relative, camera.up);
+  const cameraZ = dot(relative, camera.forward);
+  const perspective = CAMERA_PROFILE.fov / (CAMERA_PROFILE.fov + cameraZ);
   return {
-    x: center.x + isoX * scale,
-    y: center.y + isoY * scale
+    x: center.x + cameraX * scale * perspective,
+    y: center.y - cameraY * scale * perspective
   };
 };
 
-const unprojectPoint = (screen, center, scale, focus) => {
-  const isoX = (screen.x - center.x) / scale;
-  const isoY = (screen.y - center.y) / scale;
-  const relativeX = isoX / 0.7;
-  const relativeY = isoY / 0.35;
-  const worldX = (relativeX + relativeY) / 2;
-  const worldY = (relativeY - relativeX) / 2;
+const unprojectPoint = (screen, center, scale, camera) => {
+  const screenX = (screen.x - center.x) / scale;
+  const screenY = (center.y - screen.y) / scale;
+  const direction = normalize3d({
+    x: screenX,
+    y: screenY,
+    z: CAMERA_PROFILE.fov
+  });
+  const worldDirection = {
+    x: camera.right.x * direction.x + camera.up.x * direction.y + camera.forward.x * direction.z,
+    y: camera.right.y * direction.x + camera.up.y * direction.y + camera.forward.y * direction.z,
+    z: camera.right.z * direction.x + camera.up.z * direction.y + camera.forward.z * direction.z
+  };
+  if (Math.abs(worldDirection.z) < 0.0001) {
+    return null;
+  }
+  const t = (0 - camera.position.z) / worldDirection.z;
+  if (t <= 0) {
+    return null;
+  }
   return {
-    x: worldX + focus.x,
-    y: worldY + focus.y
+    x: camera.position.x + worldDirection.x * t,
+    y: camera.position.y + worldDirection.y * t
   };
 };
 
@@ -242,8 +321,8 @@ const getPostureHeight = (posture) => {
   return ACTOR_RENDER.height.steady;
 };
 
-const drawArenaFloor = (center, scale, radius, focus) => {
-  const floorCenter = projectPoint({ x: 0, y: 0, z: 0 }, center, scale, focus);
+const drawArenaFloor = (center, scale, radius, camera) => {
+  const floorCenter = projectPoint({ x: 0, y: 0, z: 0 }, center, scale, camera);
   ctx.save();
   ctx.strokeStyle = "rgba(123, 242, 195, 0.35)";
   ctx.lineWidth = 3;
@@ -263,16 +342,16 @@ const drawArenaFloor = (center, scale, radius, focus) => {
   ctx.lineWidth = 1;
   const spacing = 2;
   for (let x = -radius; x <= radius; x += spacing) {
-    const start = projectPoint({ x, y: -radius, z: 0 }, center, scale, focus);
-    const end = projectPoint({ x, y: radius, z: 0 }, center, scale, focus);
+    const start = projectPoint({ x, y: -radius, z: 0 }, center, scale, camera);
+    const end = projectPoint({ x, y: radius, z: 0 }, center, scale, camera);
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
   }
   for (let y = -radius; y <= radius; y += spacing) {
-    const start = projectPoint({ x: -radius, y, z: 0 }, center, scale, focus);
-    const end = projectPoint({ x: radius, y, z: 0 }, center, scale, focus);
+    const start = projectPoint({ x: -radius, y, z: 0 }, center, scale, camera);
+    const end = projectPoint({ x: radius, y, z: 0 }, center, scale, camera);
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
@@ -281,19 +360,19 @@ const drawArenaFloor = (center, scale, radius, focus) => {
   ctx.restore();
 };
 
-const drawActor = (center, scale, focus, actor, color, { glow = 12 } = {}) => {
+const drawActor = (center, scale, camera, actor, color, { glow = 12 } = {}) => {
   const postureHeight = getPostureHeight(actor.model.posture);
   const position = projectPoint(
     { x: actor.body.position.x, y: actor.body.position.y, z: 0 },
     center,
     scale,
-    focus
+    camera
   );
   const head = projectPoint(
     { x: actor.body.position.x, y: actor.body.position.y, z: postureHeight },
     center,
     scale,
-    focus
+    camera
   );
 
   ctx.save();
@@ -326,7 +405,7 @@ const drawActor = (center, scale, focus, actor, color, { glow = 12 } = {}) => {
   ctx.restore();
 };
 
-const drawWeapon = (center, scale, focus, actor, weaponState, color) => {
+const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
   if (!weaponState) {
     return;
   }
@@ -347,8 +426,8 @@ const drawWeapon = (center, scale, focus, actor, weaponState, color) => {
     z: handHeight + pose.swingPhase * 0.2
   };
 
-  const anchorPoint = projectPoint(anchor, center, scale, focus);
-  const tipPoint = projectPoint(tip, center, scale, focus);
+  const anchorPoint = projectPoint(anchor, center, scale, camera);
+  const tipPoint = projectPoint(tip, center, scale, camera);
   ctx.save();
   ctx.strokeStyle = pose.swinging ? "rgba(255, 214, 102, 0.9)" : color;
   ctx.lineWidth = pose.swinging ? 6 : 5;
@@ -360,7 +439,7 @@ const drawWeapon = (center, scale, focus, actor, weaponState, color) => {
         y: anchor.y + Math.sin(pose.angle) * point.x * geometryScale + Math.cos(pose.angle) * point.y * geometryScale,
         z: handHeight + pose.swingPhase * 0.2
       };
-      return projectPoint(rotated, center, scale, focus);
+      return projectPoint(rotated, center, scale, camera);
     });
 
     ctx.beginPath();
@@ -382,7 +461,7 @@ const drawWeapon = (center, scale, focus, actor, weaponState, color) => {
   ctx.restore();
 };
 
-const drawWeaponTrail = (center, scale, focus, actor, weaponState, color) => {
+const drawWeaponTrail = (center, scale, camera, actor, weaponState, color) => {
   if (!weaponState?.pose?.swinging) {
     return;
   }
@@ -408,7 +487,7 @@ const drawWeaponTrail = (center, scale, focus, actor, weaponState, color) => {
       y: actor.body.position.y + Math.sin(angle) * renderReach,
       z: handHeight + pose.swingPhase * 0.2
     };
-    const projected = projectPoint(tip, center, scale, focus);
+    const projected = projectPoint(tip, center, scale, camera);
     if (i === 0) {
       ctx.moveTo(projected.x, projected.y);
     } else {
@@ -419,10 +498,10 @@ const drawWeaponTrail = (center, scale, focus, actor, weaponState, color) => {
   ctx.restore();
 };
 
-const drawArenaPulse = (center, scale, radius, focus, timeMs) => {
+const drawArenaPulse = (center, scale, radius, camera, timeMs) => {
   const pulse = 0.5 + Math.sin(timeMs / 900) * 0.5;
   const pulseRadius = radius * (0.9 + pulse * 0.1);
-  const pulseCenter = projectPoint({ x: 0, y: 0, z: 0 }, center, scale, focus);
+  const pulseCenter = projectPoint({ x: 0, y: 0, z: 0 }, center, scale, camera);
   ctx.save();
   ctx.strokeStyle = `rgba(123, 242, 195, ${0.08 + pulse * 0.1})`;
   ctx.lineWidth = 2;
@@ -440,7 +519,7 @@ const drawArenaPulse = (center, scale, radius, focus, timeMs) => {
   ctx.restore();
 };
 
-const drawSpeedStreaks = (center, scale, focus, actor, speed, color) => {
+const drawSpeedStreaks = (center, scale, camera, actor, speed, color) => {
   if (speed < 4) {
     return;
   }
@@ -459,7 +538,7 @@ const drawSpeedStreaks = (center, scale, focus, actor, speed, color) => {
       },
       center,
       scale,
-      focus
+      camera
     );
     const end = projectPoint(
       {
@@ -469,7 +548,7 @@ const drawSpeedStreaks = (center, scale, focus, actor, speed, color) => {
       },
       center,
       scale,
-      focus
+      camera
     );
     ctx.beginPath();
     ctx.moveTo(start.x, start.y);
@@ -487,23 +566,30 @@ const render = (frame) => {
   const radius = frame.arenaRadius;
   const baseScale = computeViewportScale(width, height, radius);
   const scale = reducedMotion ? baseScale * 0.9 : baseScale;
-  const focus = reducedMotion ? { x: 0, y: 0 } : computeCameraFocus(frame);
+  const camera = reducedMotion
+    ? {
+      position: { x: 0, y: 0, z: CAMERA_PROFILE.height },
+      forward: { x: 0, y: 1, z: -0.3 },
+      right: { x: 1, y: 0, z: 0 },
+      up: { x: 0, y: 0.3, z: 1 }
+    }
+    : computeCameraRig(frame);
   const glow = reducedMotion ? 0 : 12;
 
   ctx.fillStyle = "rgba(8, 10, 18, 0.85)";
   ctx.fillRect(0, 0, width, height);
 
-  drawArenaFloor(center, scale, radius, focus);
-  drawArenaPulse(center, scale, radius, focus, frame.timeMs);
+  drawArenaFloor(center, scale, radius, camera);
+  drawArenaPulse(center, scale, radius, camera, frame.timeMs);
 
-  drawWeaponTrail(center, scale, focus, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.55)");
-  drawWeaponTrail(center, scale, focus, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.65)");
-  drawWeapon(center, scale, focus, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.9)");
-  drawWeapon(center, scale, focus, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.95)");
-  drawSpeedStreaks(center, scale, focus, frame.player, frame.speed, "rgba(123, 242, 195, 0.7)");
-  drawSpeedStreaks(center, scale, focus, frame.rival, frame.speed * 0.7, "rgba(255, 143, 122, 0.7)");
-  drawActor(center, scale, focus, frame.rival, "rgba(255, 143, 122, 0.9)", { glow });
-  drawActor(center, scale, focus, frame.player, "rgba(123, 242, 195, 0.95)", { glow });
+  drawWeaponTrail(center, scale, camera, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.55)");
+  drawWeaponTrail(center, scale, camera, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.65)");
+  drawWeapon(center, scale, camera, frame.rival, frame.weapons?.rival, "rgba(255, 143, 122, 0.9)");
+  drawWeapon(center, scale, camera, frame.player, frame.weapons?.player, "rgba(123, 242, 195, 0.95)");
+  drawSpeedStreaks(center, scale, camera, frame.player, frame.speed, "rgba(123, 242, 195, 0.7)");
+  drawSpeedStreaks(center, scale, camera, frame.rival, frame.speed * 0.7, "rgba(255, 143, 122, 0.7)");
+  drawActor(center, scale, camera, frame.rival, "rgba(255, 143, 122, 0.9)", { glow });
+  drawActor(center, scale, camera, frame.player, "rgba(123, 242, 195, 0.95)", { glow });
 };
 
 const loop = (timestamp) => {
@@ -528,9 +614,16 @@ const loop = (timestamp) => {
   const { width, height } = canvas.getBoundingClientRect();
   const center = computeViewportCenter(width, height);
   const baseScale = computeViewportScale(width, height, state.arenaRadius);
-  const focus = reducedMotion ? { x: 0, y: 0 } : computeCameraFocus(state);
+  const camera = reducedMotion
+    ? {
+      position: { x: 0, y: 0, z: CAMERA_PROFILE.height },
+      forward: { x: 0, y: 1, z: -0.3 },
+      right: { x: 1, y: 0, z: 0 },
+      up: { x: 0, y: 0.3, z: 1 }
+    }
+    : computeCameraRig(state);
   const aimTarget = pointerState.active
-    ? unprojectPoint({ x: pointerState.x, y: pointerState.y }, center, baseScale, focus)
+    ? unprojectPoint({ x: pointerState.x, y: pointerState.y }, center, baseScale, camera)
     : null;
   const attackActive =
     pointerState.attack || inputState.has("Space") || inputState.has("KeyF");

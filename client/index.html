@@ -30,6 +30,13 @@
         <aside class="hud">
           <div class="hud-card">
             <h2>Hero Status</h2>
+            <div class="bar bar--health">
+              <div class="bar-label">Health</div>
+              <div class="bar-track">
+                <div class="bar-fill" id="health-fill"></div>
+              </div>
+              <div class="bar-value" id="health-value">--</div>
+            </div>
             <div class="bar">
               <div class="bar-label">Stamina</div>
               <div class="bar-track">
@@ -66,6 +73,17 @@
                 <p class="stat-label">Loadout</p>
                 <p class="stat-value" id="weapon-loadout">Vanguard</p>
               </div>
+            </div>
+          </div>
+
+          <div class="hud-card">
+            <h2>Rival Status</h2>
+            <div class="bar bar--health">
+              <div class="bar-label">Health</div>
+              <div class="bar-track">
+                <div class="bar-fill" id="rival-health-fill"></div>
+              </div>
+              <div class="bar-value" id="rival-health-value">--</div>
             </div>
           </div>
 

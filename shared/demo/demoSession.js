@@ -1,4 +1,5 @@
-import { createWeapon, createWeaponGeometry } from "../combat/weaponSystem.js";
+import { applyDamage, createCombatant } from "../combat/damageSystem.js";
+import { computeWeaponImpact, createWeapon, createWeaponGeometry } from "../combat/weaponSystem.js";
 import { createSimulation } from "../simulation/simulationSystem.js";
 import { createLocomotionSystem } from "../simulation/locomotionSystem.js";
 import { createPlayerSystem } from "../simulation/playerSystem.js";
@@ -104,6 +105,11 @@ const clampInsideArena = (body, arenaRadius) => {
   return true;
 };
 
+const HIT_PART_ORDER = ["torso", "leftArm", "rightArm", "leftLeg", "rightLeg", "head"];
+const HIT_COOLDOWN_MS = 320;
+const HIT_PHASE = 0.55;
+const HIT_RANGE_PADDING = 0.4;
+
 const buildRivalIntent = (elapsedMs) => {
   const t = elapsedMs / 1000;
   return {
@@ -138,6 +144,62 @@ const normalizeBodyConfig = (value, label) => {
     throw new RangeError(`${label}.mass must be a positive number`);
   }
   return value;
+};
+
+const selectHitPart = (combatant, stepIndex) => {
+  const available = HIT_PART_ORDER.filter(
+    (part) => combatant.parts[part] && combatant.parts[part].status !== "severed"
+  );
+  const list = available.length > 0 ? available : HIT_PART_ORDER;
+  const index = stepIndex % list.length;
+  return list[index];
+};
+
+const selectHitOrgan = (part, stepIndex, weakPoint) => {
+  if (!weakPoint) {
+    return undefined;
+  }
+  if (part === "head") {
+    return "brain";
+  }
+  if (part === "torso") {
+    return stepIndex % 2 === 0 ? "heart" : "lungs";
+  }
+  return undefined;
+};
+
+const resolveAttackType = (weaponType) => {
+  if (weaponType === "spear" || weaponType === "dagger") {
+    return "thrust";
+  }
+  if (weaponType === "mace" || weaponType === "club" || weaponType === "shield") {
+    return "blunt";
+  }
+  if (weaponType === "halberd") {
+    return "slash";
+  }
+  return "slash";
+};
+
+const computeImpactVelocity = ({ attackerBody, defenderBody, weaponPose }) => {
+  const relativeSpeed = Math.hypot(
+    attackerBody.velocity.x - defenderBody.velocity.x,
+    attackerBody.velocity.y - defenderBody.velocity.y
+  );
+  const swingBoost = 2 + weaponPose.swingPhase * 6;
+  return Math.max(1, relativeSpeed + swingBoost);
+};
+
+const computeCombatantHealth = (combatant) => {
+  const parts = Object.values(combatant.parts ?? {});
+  const max = parts.reduce((total, part) => total + (part.maxHealth ?? 0), 0);
+  const current = parts.reduce((total, part) => total + (part.current ?? 0), 0);
+  return {
+    current,
+    max,
+    ratio: max > 0 ? current / max : 0,
+    vitals: { ...combatant.vitals }
+  };
 };
 
 const DEFAULT_WEAPON_SPECS = {
@@ -494,6 +556,24 @@ export const createDemoSession = ({
   const spawn = buildSpawnPositions(resolvedArena, resolvedSpawn);
   let elapsedMs = 0;
   let stepIndex = 0;
+  let combatants = {
+    player: createCombatant({
+      id: resolvedPlayerId,
+      toggles: { limbLoss: true, organDamage: true }
+    }),
+    rival: createCombatant({
+      id: resolvedRivalId,
+      toggles: { limbLoss: true, organDamage: true }
+    })
+  };
+  const lastHitTimes = {
+    [resolvedPlayerId]: -Infinity,
+    [resolvedRivalId]: -Infinity
+  };
+  const lastSwingPhases = {
+    [resolvedPlayerId]: 0,
+    [resolvedRivalId]: 0
+  };
   const playerWeaponSwingState = {
     active: false,
     progress: 0,
@@ -518,6 +598,75 @@ export const createDemoSession = ({
     simulation.removeActor(resolvedRivalId);
     playerSystem.removePlayer(resolvedPlayerId);
     playerSystem.removePlayer(resolvedRivalId);
+  };
+
+  const applyImpulse = (body, direction, magnitude) => {
+    const resolved = Math.max(0, magnitude);
+    if (!Number.isFinite(resolved) || resolved <= 0) {
+      return;
+    }
+    const impulseScale = resolved * 0.02;
+    body.velocity.x += (direction.x * impulseScale) / body.mass;
+    body.velocity.y += (direction.y * impulseScale) / body.mass;
+  };
+
+  const evaluateStrike = ({
+    attackerId,
+    defenderId,
+    weaponState,
+    attackerBody,
+    defenderBody,
+    defenderCombatant,
+    clockMs
+  }) => {
+    const pose = weaponState?.pose;
+    if (!pose) {
+      return null;
+    }
+    const lastSwingPhase = lastSwingPhases[attackerId];
+    lastSwingPhases[attackerId] = pose.swingPhase;
+    if (!pose.swinging || lastSwingPhase >= HIT_PHASE || pose.swingPhase < HIT_PHASE) {
+      return null;
+    }
+    if (clockMs - lastHitTimes[attackerId] < HIT_COOLDOWN_MS) {
+      return null;
+    }
+    const distance = Math.hypot(
+      attackerBody.position.x - defenderBody.position.x,
+      attackerBody.position.y - defenderBody.position.y
+    );
+    const reach = Number.isFinite(pose.reach) ? pose.reach : weaponState.weapon.length;
+    if (distance > reach + HIT_RANGE_PADDING) {
+      return null;
+    }
+
+    const attackType = resolveAttackType(weaponState.weapon.type);
+    const velocity = computeImpactVelocity({ attackerBody, defenderBody, weaponPose: pose });
+    const weakPoint = pose.swingPhase > 0.85;
+    const part = selectHitPart(defenderCombatant, stepIndex);
+    const impact = computeWeaponImpact({ weapon: weaponState.weapon, velocity, attackType, weakPoint });
+    const hit = {
+      part,
+      type: impact.type,
+      amount: Math.max(1, Math.round(impact.amount)),
+      weakPoint,
+      organ: selectHitOrgan(part, stepIndex, weakPoint)
+    };
+    const report = applyDamage(defenderCombatant, hit);
+    playerSystem.applyDamageReport(defenderId, report);
+    const direction = {
+      x: defenderBody.position.x - attackerBody.position.x,
+      y: defenderBody.position.y - attackerBody.position.y
+    };
+    const dirLength = Math.hypot(direction.x, direction.y) || 1;
+    applyImpulse(defenderBody, { x: direction.x / dirLength, y: direction.y / dirLength }, hit.amount);
+    lastHitTimes[attackerId] = clockMs;
+    return {
+      attackerId,
+      defenderId,
+      hit,
+      report
+    };
   };
 
   const getSnapshot = () => {
@@ -557,6 +706,10 @@ export const createDemoSession = ({
           elapsedMs,
           phaseOffset: 0.3
         })
+      },
+      health: {
+        player: computeCombatantHealth(combatants.player),
+        rival: computeCombatantHealth(combatants.rival)
       }
     };
   };
@@ -649,6 +802,38 @@ export const createDemoSession = ({
       deltaMs,
       swingState: playerWeaponSwingState
     });
+    const rivalWeaponState = buildWeaponState({
+      weapon: weaponLoadout.rival,
+      model: rivalRecord.model,
+      elapsedMs,
+      phaseOffset: 0.3
+    });
+
+    const hits = [];
+    const playerHit = evaluateStrike({
+      attackerId: resolvedPlayerId,
+      defenderId: resolvedRivalId,
+      weaponState: playerWeaponState,
+      attackerBody: playerBody,
+      defenderBody: rivalBody,
+      defenderCombatant: combatants.rival,
+      clockMs: elapsedMs
+    });
+    if (playerHit) {
+      hits.push(playerHit);
+    }
+    const rivalHit = evaluateStrike({
+      attackerId: resolvedRivalId,
+      defenderId: resolvedPlayerId,
+      weaponState: rivalWeaponState,
+      attackerBody: rivalBody,
+      defenderBody: playerBody,
+      defenderCombatant: combatants.player,
+      clockMs: elapsedMs
+    });
+    if (rivalHit) {
+      hits.push(rivalHit);
+    }
 
     return {
       ...getSnapshot(),
@@ -669,14 +854,14 @@ export const createDemoSession = ({
         player: playerClamped,
         rival: rivalClamped
       },
+      hits,
+      health: {
+        player: computeCombatantHealth(combatants.player),
+        rival: computeCombatantHealth(combatants.rival)
+      },
       weapons: {
         player: playerWeaponState,
-        rival: buildWeaponState({
-          weapon: weaponLoadout.rival,
-          model: rivalRecord.model,
-          elapsedMs,
-          phaseOffset: 0.3
-        })
+        rival: rivalWeaponState
       }
     };
   };
@@ -685,6 +870,20 @@ export const createDemoSession = ({
     teardownActors();
     elapsedMs = 0;
     stepIndex = 0;
+    combatants = {
+      player: createCombatant({
+        id: resolvedPlayerId,
+        toggles: { limbLoss: true, organDamage: true }
+      }),
+      rival: createCombatant({
+        id: resolvedRivalId,
+        toggles: { limbLoss: true, organDamage: true }
+      })
+    };
+    lastHitTimes[resolvedPlayerId] = -Infinity;
+    lastHitTimes[resolvedRivalId] = -Infinity;
+    lastSwingPhases[resolvedPlayerId] = 0;
+    lastSwingPhases[resolvedRivalId] = 0;
     setupActors();
     return getSnapshot();
   };
@@ -723,5 +922,10 @@ export const __testables = {
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,
-  normalizeBodyConfig
+  normalizeBodyConfig,
+  selectHitPart,
+  selectHitOrgan,
+  resolveAttackType,
+  computeImpactVelocity,
+  computeCombatantHealth
 };
