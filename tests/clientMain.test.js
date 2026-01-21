@@ -3,12 +3,27 @@ import { describe, expect, it, vi } from "vitest";
 const mockSession = vi.hoisted(() => ({
   getSnapshot: vi.fn(),
   reset: vi.fn(),
-  step: vi.fn()
+  step: vi.fn(),
+  setWeapons: vi.fn()
 }));
 
 vi.mock("../shared/demo/demoSession.js", () => ({
   createDemoSession: () => mockSession
 }));
+
+const ACTOR_HEIGHTS = {
+  fallen: 0.6,
+  stumbling: 1.4,
+  steady: 1.9
+};
+const WEAPON_RENDER_SCALE = 1.35;
+const CAMERA_PROFILE = {
+  focusAheadRatio: 0.7,
+  shoulderOffset: 1.1,
+  centerBiasX: 0.52,
+  centerBiasY: 0.62,
+  zoomScale: 1.38
+};
 
 const buildSnapshot = ({
   exhausted = false,
@@ -16,8 +31,12 @@ const buildSnapshot = ({
   posture,
   weapons = true,
   geometry = true,
-  reach
+  reach,
+  weaponType = "sword",
+  timeMs = 1000,
+  weaponControl
 } = {}) => ({
+  timeMs,
   arenaRadius: 10,
   player: {
     body: {
@@ -39,6 +58,11 @@ const buildSnapshot = ({
       posture: "steady"
     }
   },
+  weaponControl: weaponControl ?? {
+    attack: false,
+    guard: false,
+    aimAngle: 0.4
+  },
   intent: {
     move: { x: 0.5, y: 0.2 }
   },
@@ -46,6 +70,7 @@ const buildSnapshot = ({
     ? {
       player: {
         weapon: {
+          type: weaponType,
           length: 1.2,
           geometry: geometry ? { points: [{ x: 0, y: 0.1 }, { x: 1, y: 0 }, { x: 0, y: -0.1 }] } : null
         },
@@ -77,7 +102,11 @@ const stubContext = () => ({
   save: vi.fn(),
   restore: vi.fn(),
   shadowBlur: 0,
-  shadowColor: ""
+  shadowColor: "",
+  globalAlpha: 1,
+  strokeStyle: "",
+  fillStyle: "",
+  lineWidth: 1
 });
 
 const setupDom = () => {
@@ -86,7 +115,10 @@ const setupDom = () => {
   const elements = {
     "#arena": {
       getContext: () => canvasContext,
-      getBoundingClientRect: () => ({ width: 960, height: 640 })
+      getBoundingClientRect: () => ({ width: 960, height: 640 }),
+      addEventListener: (event, handler) => {
+        handlers[event] = handler;
+      }
     },
     "#stamina-fill": { style: {} },
     "#stamina-value": { textContent: "" },
@@ -94,6 +126,9 @@ const setupDom = () => {
     "#speed": { textContent: "" },
     "#intent": { textContent: "" },
     "#motion": { textContent: "" },
+    "#weapon-status": { textContent: "" },
+    "#weapon-angle": { textContent: "" },
+    "#weapon-loadout": { textContent: "" },
     "#reset": {
       addEventListener: (event, handler) => {
         handlers.click = handler;
@@ -128,6 +163,7 @@ describe("client main", () => {
     let stepCount = 0;
     mockSession.getSnapshot.mockImplementation(() => buildSnapshot());
     mockSession.reset.mockImplementation(() => buildSnapshot({ exhausted: false }));
+    mockSession.setWeapons.mockImplementation(() => buildSnapshot({ weaponType: "mace" }));
     mockSession.step.mockImplementation(() => {
       stepCount += 1;
       if (stepCount === 1) {
@@ -143,7 +179,10 @@ describe("client main", () => {
     const start = performance.now();
     rafCallbacks.shift()(start);
     handlers.keydown({ code: "ShiftRight" });
+    handlers.pointerdown({ clientX: 200, clientY: 200 });
     rafCallbacks.shift()(start + 16);
+    handlers.keydown({ code: "KeyV" });
+    rafCallbacks.shift()(start + 24);
     handlers.keyup({ code: "ShiftRight" });
     rafCallbacks.shift()(start + 32);
 
@@ -156,8 +195,15 @@ describe("client main", () => {
     expect(elements["#stamina-value"].textContent).toContain("/");
     expect(elements["#posture"].textContent.length).toBeGreaterThan(0);
     expect(elements["#motion"].textContent).toBe("Full");
+    expect(elements["#weapon-status"].textContent.length).toBeGreaterThan(0);
+    expect(elements["#weapon-angle"].textContent).toContain("°");
+    expect(elements["#weapon-loadout"].textContent.length).toBeGreaterThan(0);
     expect(canvasContext.arc).toHaveBeenCalled();
     expect(canvasContext.ellipse).toHaveBeenCalled();
+
+    const lastCall = mockSession.step.mock.calls.at(-1);
+    expect(lastCall[2].weapon.attack).toBe(true);
+    expect(mockSession.setWeapons).toHaveBeenCalled();
   });
 
   it("skips invalid frame deltas and schedules another frame", async () => {
@@ -201,17 +247,31 @@ describe("client main", () => {
     rafCallbacks.shift()(start);
     rafCallbacks.shift()(start + 16);
 
-    const focus = {
-      x: (snapshot.player.body.position.x + snapshot.rival.body.position.x) / 2,
-      y: (snapshot.player.body.position.y + snapshot.rival.body.position.y) / 2
+    const toRival = {
+      x: snapshot.rival.body.position.x - snapshot.player.body.position.x,
+      y: snapshot.rival.body.position.y - snapshot.player.body.position.y
     };
-    const center = { x: 960 / 2, y: 640 * 0.58 };
-    const scale = Math.min(960, 640) / (snapshot.arenaRadius * 2);
+    const distance = Math.hypot(toRival.x, toRival.y) || 1;
+    const direction = { x: toRival.x / distance, y: toRival.y / distance };
+    const shoulder = { x: -direction.y, y: direction.x };
+    const focusDistance = distance * CAMERA_PROFILE.focusAheadRatio;
+    const focus = {
+      x:
+        snapshot.player.body.position.x +
+        direction.x * focusDistance +
+        shoulder.x * CAMERA_PROFILE.shoulderOffset,
+      y:
+        snapshot.player.body.position.y +
+        direction.y * focusDistance +
+        shoulder.y * CAMERA_PROFILE.shoulderOffset
+    };
+    const center = { x: 960 * CAMERA_PROFILE.centerBiasX, y: 640 * CAMERA_PROFILE.centerBiasY };
+    const scale = (Math.min(960, 640) / (snapshot.arenaRadius * 2)) * CAMERA_PROFILE.zoomScale;
     const postureHeight = snapshot.player.model.posture === "fallen"
-      ? 0.4
+      ? ACTOR_HEIGHTS.fallen
       : snapshot.player.model.posture === "stumbling"
-        ? 1.1
-        : 1.5;
+        ? ACTOR_HEIGHTS.stumbling
+        : ACTOR_HEIGHTS.steady;
     const handHeight = postureHeight * 0.7;
     const anchor = {
       x: snapshot.player.body.position.x,
@@ -219,8 +279,8 @@ describe("client main", () => {
       z: handHeight
     };
     const tip = {
-      x: anchor.x + Math.cos(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach,
-      y: anchor.y + Math.sin(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach,
+      x: anchor.x + Math.cos(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE,
+      y: anchor.y + Math.sin(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE,
       z: handHeight + snapshot.weapons.player.pose.swingPhase * 0.2
     };
     const projectPoint = (point) => {
@@ -275,19 +335,34 @@ describe("client main", () => {
     rafCallbacks.shift()(start);
     rafCallbacks.shift()(start + 16);
 
-    const focus = {
-      x: (snapshot.player.body.position.x + snapshot.rival.body.position.x) / 2,
-      y: (snapshot.player.body.position.y + snapshot.rival.body.position.y) / 2
+    const toRival = {
+      x: snapshot.rival.body.position.x - snapshot.player.body.position.x,
+      y: snapshot.rival.body.position.y - snapshot.player.body.position.y
     };
-    const center = { x: 960 / 2, y: 640 * 0.58 };
-    const scale = Math.min(960, 640) / (snapshot.arenaRadius * 2);
+    const distance = Math.hypot(toRival.x, toRival.y) || 1;
+    const direction = { x: toRival.x / distance, y: toRival.y / distance };
+    const shoulder = { x: -direction.y, y: direction.x };
+    const focusDistance = distance * CAMERA_PROFILE.focusAheadRatio;
+    const focus = {
+      x:
+        snapshot.player.body.position.x +
+        direction.x * focusDistance +
+        shoulder.x * CAMERA_PROFILE.shoulderOffset,
+      y:
+        snapshot.player.body.position.y +
+        direction.y * focusDistance +
+        shoulder.y * CAMERA_PROFILE.shoulderOffset
+    };
+    const center = { x: 960 * CAMERA_PROFILE.centerBiasX, y: 640 * CAMERA_PROFILE.centerBiasY };
+    const scale = (Math.min(960, 640) / (snapshot.arenaRadius * 2)) * CAMERA_PROFILE.zoomScale;
     const postureHeight = snapshot.player.model.posture === "fallen"
-      ? 0.4
+      ? ACTOR_HEIGHTS.fallen
       : snapshot.player.model.posture === "stumbling"
-        ? 1.1
-        : 1.5;
+        ? ACTOR_HEIGHTS.stumbling
+        : ACTOR_HEIGHTS.steady;
     const handHeight = postureHeight * 0.7;
-    const geometryScale = snapshot.weapons.player.pose.reach / snapshot.weapons.player.weapon.length;
+    const geometryScale = (snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE)
+      / snapshot.weapons.player.weapon.length;
     const point = snapshot.weapons.player.weapon.geometry.points[1];
     const rotated = {
       x: snapshot.player.body.position.x
