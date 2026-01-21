@@ -34,8 +34,30 @@ const normalizeStepOptions = (options = {}) => {
   if (options.sprint !== undefined && typeof options.sprint !== "boolean") {
     throw new TypeError("options.sprint must be a boolean");
   }
+  if (options.weapon !== undefined && (!options.weapon || typeof options.weapon !== "object" || Array.isArray(options.weapon))) {
+    throw new TypeError("options.weapon must be an object");
+  }
+  if (options.weapon?.attack !== undefined && typeof options.weapon.attack !== "boolean") {
+    throw new TypeError("options.weapon.attack must be a boolean");
+  }
+  if (options.weapon?.guard !== undefined && typeof options.weapon.guard !== "boolean") {
+    throw new TypeError("options.weapon.guard must be a boolean");
+  }
+  if (options.weapon?.aim !== undefined && options.weapon.aim !== null) {
+    if (!options.weapon.aim || typeof options.weapon.aim !== "object" || Array.isArray(options.weapon.aim)) {
+      throw new TypeError("options.weapon.aim must be an object");
+    }
+    if (!Number.isFinite(options.weapon.aim.x) || !Number.isFinite(options.weapon.aim.y)) {
+      throw new RangeError("options.weapon.aim must include finite x and y");
+    }
+  }
   return {
-    sprint: options.sprint ?? false
+    sprint: options.sprint ?? false,
+    weapon: {
+      aim: options.weapon?.aim ?? null,
+      attack: options.weapon?.attack ?? null,
+      guard: options.weapon?.guard ?? null
+    }
   };
 };
 
@@ -98,6 +120,22 @@ const normalizeWeaponConfig = (value, label) => {
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError(`${label} must be an object`);
+  }
+  return value;
+};
+
+const normalizeBodyConfig = (value, label) => {
+  if (value === undefined) {
+    return {};
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  if (value.damping !== undefined && (!Number.isFinite(value.damping) || value.damping < 0 || value.damping > 1)) {
+    throw new RangeError(`${label}.damping must be between 0 and 1`);
+  }
+  if (value.mass !== undefined && (!Number.isFinite(value.mass) || value.mass <= 0)) {
+    throw new RangeError(`${label}.mass must be a positive number`);
   }
   return value;
 };
@@ -196,12 +234,194 @@ const computeWeaponPose = (
   };
 };
 
-const buildWeaponState = ({ weapon, model, elapsedMs, phaseOffset = 0 } = {}) => {
+const normalizeAimInput = (aim) => {
+  if (aim === null || aim === undefined) {
+    return null;
+  }
+  if (!aim || typeof aim !== "object" || Array.isArray(aim)) {
+    throw new TypeError("aim must be an object");
+  }
+  if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y)) {
+    throw new RangeError("aim must include finite x and y");
+  }
+  return aim;
+};
+
+const normalizeWeaponIntent = (value) => {
+  if (value === undefined) {
+    return { aim: null, attack: null, guard: null };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("weapon intent must be an object");
+  }
+  if (value.attack !== undefined && value.attack !== null && typeof value.attack !== "boolean") {
+    throw new TypeError("weapon intent attack must be a boolean");
+  }
+  if (value.guard !== undefined && value.guard !== null && typeof value.guard !== "boolean") {
+    throw new TypeError("weapon intent guard must be a boolean");
+  }
+  return {
+    aim: normalizeAimInput(value.aim ?? null),
+    attack: value.attack ?? null,
+    guard: value.guard ?? null
+  };
+};
+
+const inputHas = (inputs, code) => inputs.some((input) => input.code === code && input.active);
+
+const readAimDirectionFromInputs = (inputs) => {
+  let x = 0;
+  let y = 0;
+  if (inputHas(inputs, "ArrowUp") || inputHas(inputs, "KeyI")) {
+    y += 1;
+  }
+  if (inputHas(inputs, "ArrowDown") || inputHas(inputs, "KeyK")) {
+    y -= 1;
+  }
+  if (inputHas(inputs, "ArrowLeft") || inputHas(inputs, "KeyJ")) {
+    x -= 1;
+  }
+  if (inputHas(inputs, "ArrowRight") || inputHas(inputs, "KeyL")) {
+    x += 1;
+  }
+  if (x === 0 && y === 0) {
+    return null;
+  }
+  const length = Math.hypot(x, y);
+  return { x: x / length, y: y / length };
+};
+
+const computeAimTarget = ({ aim, inputs, playerBody, rivalBody }) => {
+  const normalizedAim = normalizeAimInput(aim);
+  if (normalizedAim) {
+    return normalizedAim;
+  }
+  const direction = readAimDirectionFromInputs(inputs);
+  if (direction) {
+    return {
+      x: playerBody.position.x + direction.x,
+      y: playerBody.position.y + direction.y
+    };
+  }
+  return { x: rivalBody.position.x, y: rivalBody.position.y };
+};
+
+const computeAimAngle = ({ aimTarget, playerBody }) =>
+  Math.atan2(aimTarget.y - playerBody.position.y, aimTarget.x - playerBody.position.x);
+
+const computeSwingDuration = ({ weapon, model, guard }) => {
   if (!weapon || typeof weapon !== "object") {
     throw new TypeError("weapon must be an object");
   }
   if (!model || typeof model !== "object" || !model.stamina) {
     throw new TypeError("model must include stamina");
+  }
+  const base = 420 + weapon.mass * 110;
+  const fatigueScale = model.stamina.exhausted ? 1.35 : 1;
+  const guardScale = guard ? 0.9 : 1;
+  return base * fatigueScale * guardScale;
+};
+
+const advanceWeaponSwing = ({ swingState, deltaMs, attackActive, durationMs }) => {
+  if (!swingState || typeof swingState !== "object") {
+    throw new TypeError("swingState must be an object");
+  }
+  if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+    throw new RangeError("deltaMs must be a positive number");
+  }
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    throw new RangeError("durationMs must be a positive number");
+  }
+  if (attackActive && !swingState.active) {
+    swingState.active = true;
+    swingState.progress = 0;
+    swingState.direction *= -1;
+  }
+  if (swingState.active) {
+    swingState.progress += deltaMs / durationMs;
+    if (swingState.progress >= 1) {
+      swingState.active = false;
+      swingState.progress = 0;
+    }
+  }
+  const swingPhase = swingState.active ? Math.sin(swingState.progress * Math.PI) : 0;
+  return {
+    swingPhase,
+    swinging: swingState.active,
+    direction: swingState.direction
+  };
+};
+
+const computeControlledWeaponPose = ({
+  weapon,
+  model,
+  elapsedMs,
+  deltaMs,
+  aimAngle,
+  attackActive,
+  guardActive,
+  swingState
+}) => {
+  const durationMs = computeSwingDuration({ weapon, model, guard: guardActive });
+  const swingUpdate = advanceWeaponSwing({
+    swingState,
+    deltaMs,
+    attackActive,
+    durationMs
+  });
+  const postureArc = model.posture === "fallen" ? 0.35 : model.posture === "stumbling" ? 0.65 : 0.9;
+  const guardArc = guardActive ? 0.5 : 1;
+  const fatigueArc = model.stamina.exhausted ? 0.85 : 1;
+  const swingArc = postureArc * guardArc * fatigueArc;
+  const sway = Math.sin(elapsedMs / 1000 * 1.6) * (guardActive ? 0.05 : 0.12);
+  const angle = aimAngle + sway + swingUpdate.direction * (swingUpdate.swingPhase - 0.5) * swingArc;
+  const reachBase = weapon.length * (guardActive ? 0.76 : 0.9) * (model.stamina.exhausted ? 0.95 : 1);
+  const reach = reachBase * (1 + swingUpdate.swingPhase * 0.18);
+
+  return {
+    angle,
+    reach,
+    swingPhase: swingUpdate.swingPhase,
+    swinging: swingUpdate.swinging,
+    dominantHand: model.dominantHand
+  };
+};
+
+const buildWeaponState = ({
+  weapon,
+  model,
+  elapsedMs,
+  phaseOffset = 0,
+  control,
+  deltaMs,
+  swingState
+} = {}) => {
+  if (!weapon || typeof weapon !== "object") {
+    throw new TypeError("weapon must be an object");
+  }
+  if (!model || typeof model !== "object" || !model.stamina) {
+    throw new TypeError("model must include stamina");
+  }
+  if (control) {
+    if (!Number.isFinite(deltaMs) || deltaMs <= 0) {
+      throw new RangeError("deltaMs must be a positive number");
+    }
+    if (!swingState || typeof swingState !== "object") {
+      throw new TypeError("swingState must be an object");
+    }
+    return {
+      weapon: { ...weapon },
+      pose: computeControlledWeaponPose({
+        weapon,
+        model,
+        elapsedMs,
+        deltaMs,
+        aimAngle: control.aimAngle,
+        attackActive: control.attackActive,
+        guardActive: control.guardActive,
+        swingState
+      })
+    };
   }
   const stamina = model.stamina;
   const fatigueScale = stamina.exhausted ? 0.75 : 1;
@@ -229,7 +449,8 @@ export const createDemoSession = ({
   stamina,
   balance,
   locomotion,
-  weapons
+  weapons,
+  body
 } = {}) => {
   const resolvedArena = normalizePositive(arenaRadius, "arenaRadius");
   const resolvedSpawn = normalizePositive(spawnOffset, "spawnOffset");
@@ -253,10 +474,15 @@ export const createDemoSession = ({
   const resolvedStamina = normalizeObject(stamina, "stamina");
   const resolvedBalance = normalizeObject(balance, "balance");
   const resolvedLocomotion = normalizeObject(locomotion, "locomotion");
-  const weaponLoadout = buildWeaponLoadout(weapons, {
+  let weaponLoadout = buildWeaponLoadout(weapons, {
     player: resolvedPlayerId,
     rival: resolvedRivalId
   });
+  const resolvedBody = {
+    damping: 0.93,
+    mass: 1.2,
+    ...normalizeBodyConfig(body, "body")
+  };
 
   const simulation = createSimulation({ physics: resolvedPhysics, movement: resolvedMovement });
   const locomotionSystem = createLocomotionSystem(resolvedLocomotion);
@@ -268,15 +494,20 @@ export const createDemoSession = ({
   const spawn = buildSpawnPositions(resolvedArena, resolvedSpawn);
   let elapsedMs = 0;
   let stepIndex = 0;
+  const playerWeaponSwingState = {
+    active: false,
+    progress: 0,
+    direction: 1
+  };
 
   const setupActors = () => {
     simulation.addActor({
       id: resolvedPlayerId,
-      body: { position: { ...spawn.player }, damping: 0.9, mass: 1 }
+      body: { position: { ...spawn.player }, damping: resolvedBody.damping, mass: resolvedBody.mass }
     });
     simulation.addActor({
       id: resolvedRivalId,
-      body: { position: { ...spawn.rival }, damping: 0.9, mass: 1 }
+      body: { position: { ...spawn.rival }, damping: resolvedBody.damping, mass: resolvedBody.mass }
     });
     playerSystem.addPlayer({ id: resolvedPlayerId });
     playerSystem.addPlayer({ id: resolvedRivalId, model: { dominantHand: "left" } });
@@ -304,6 +535,14 @@ export const createDemoSession = ({
       rival: {
         body: snapshotBody(rivalBody),
         model: playerSystem.snapshotPlayer(resolvedRivalId).model
+      },
+      weaponControl: {
+        attack: false,
+        guard: false,
+        aimAngle: computeAimAngle({
+          aimTarget: { x: rivalBody.position.x, y: rivalBody.position.y },
+          playerBody
+        })
       },
       weapons: {
         player: buildWeaponState({
@@ -386,6 +625,31 @@ export const createDemoSession = ({
     const playerClamped = clampInsideArena(playerBody, resolvedArena);
     const rivalClamped = clampInsideArena(rivalBody, resolvedArena);
 
+    const resolvedInputs = Array.isArray(inputs) ? inputs : [];
+    const weaponIntent = normalizeWeaponIntent(resolvedOptions.weapon);
+    const aimTarget = computeAimTarget({
+      aim: weaponIntent.aim,
+      inputs: resolvedInputs,
+      playerBody,
+      rivalBody
+    });
+    const aimAngle = computeAimAngle({ aimTarget, playerBody });
+    const attackActive = weaponIntent.attack ?? (inputHas(resolvedInputs, "Space") || inputHas(resolvedInputs, "KeyF"));
+    const guardActive = weaponIntent.guard ?? inputHas(resolvedInputs, "KeyQ");
+
+    const playerWeaponState = buildWeaponState({
+      weapon: weaponLoadout.player,
+      model: playerRecord.model,
+      elapsedMs,
+      control: {
+        aimAngle,
+        attackActive,
+        guardActive
+      },
+      deltaMs,
+      swingState: playerWeaponSwingState
+    });
+
     return {
       ...getSnapshot(),
       intent: playerStep.intent,
@@ -396,9 +660,23 @@ export const createDemoSession = ({
         rival: rivalLocomotion
       },
       sprinting: canSprint,
+      weaponControl: {
+        attack: attackActive,
+        guard: guardActive,
+        aimAngle
+      },
       clamped: {
         player: playerClamped,
         rival: rivalClamped
+      },
+      weapons: {
+        player: playerWeaponState,
+        rival: buildWeaponState({
+          weapon: weaponLoadout.rival,
+          model: rivalRecord.model,
+          elapsedMs,
+          phaseOffset: 0.3
+        })
       }
     };
   };
@@ -411,12 +689,21 @@ export const createDemoSession = ({
     return getSnapshot();
   };
 
+  const setWeapons = (nextWeapons) => {
+    weaponLoadout = buildWeaponLoadout(nextWeapons, {
+      player: resolvedPlayerId,
+      rival: resolvedRivalId
+    });
+    return getSnapshot();
+  };
+
   setupActors();
 
   return {
     step,
     reset,
-    getSnapshot
+    getSnapshot,
+    setWeapons
   };
 };
 
@@ -428,5 +715,13 @@ export const __testables = {
   buildRivalIntent,
   buildWeaponLoadout,
   computeWeaponPose,
-  buildWeaponState
+  buildWeaponState,
+  normalizeWeaponIntent,
+  readAimDirectionFromInputs,
+  computeAimTarget,
+  computeAimAngle,
+  computeSwingDuration,
+  advanceWeaponSwing,
+  computeControlledWeaponPose,
+  normalizeBodyConfig
 };
