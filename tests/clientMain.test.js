@@ -18,11 +18,14 @@ const ACTOR_HEIGHTS = {
 };
 const WEAPON_RENDER_SCALE = 1.35;
 const CAMERA_PROFILE = {
-  focusAheadRatio: 0.7,
-  shoulderOffset: 1.1,
-  centerBiasX: 0.52,
-  centerBiasY: 0.62,
-  zoomScale: 1.38
+  followDistance: 5.2,
+  shoulderOffset: 1.3,
+  height: 2.6,
+  lookAhead: 3.2,
+  centerBiasX: 0.5,
+  centerBiasY: 0.7,
+  zoomScale: 1.2,
+  fov: 6.5
 };
 
 const buildSnapshot = ({
@@ -34,10 +37,15 @@ const buildSnapshot = ({
   reach,
   weaponType = "sword",
   timeMs = 1000,
-  weaponControl
+  weaponControl,
+  healthRatio = 0.85
 } = {}) => ({
   timeMs,
   arenaRadius: 10,
+  health: {
+    player: { current: 170, max: 200, ratio: healthRatio, vitals: { isAlive: true, consciousness: "awake" } },
+    rival: { current: 150, max: 200, ratio: healthRatio, vitals: { isAlive: true, consciousness: "awake" } }
+  },
   player: {
     body: {
       position: { x: 0, y: 0 },
@@ -109,6 +117,80 @@ const stubContext = () => ({
   lineWidth: 1
 });
 
+const normalize2d = (vector) => {
+  const length = Math.hypot(vector.x, vector.y);
+  if (length <= 0) {
+    return { x: 1, y: 0 };
+  }
+  return { x: vector.x / length, y: vector.y / length };
+};
+
+const normalize3d = (vector) => {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (length <= 0) {
+    return { x: 0, y: 0, z: 1 };
+  }
+  return { x: vector.x / length, y: vector.y / length, z: vector.z / length };
+};
+
+const cross = (a, b) => ({
+  x: a.y * b.z - a.z * b.y,
+  y: a.z * b.x - a.x * b.z,
+  z: a.x * b.y - a.y * b.x
+});
+
+const dot = (a, b) => a.x * b.x + a.y * b.y + a.z * b.z;
+
+const computeCameraRig = (snapshot) => {
+  const toRival = {
+    x: snapshot.rival.body.position.x - snapshot.player.body.position.x,
+    y: snapshot.rival.body.position.y - snapshot.player.body.position.y
+  };
+  const direction = normalize2d(toRival);
+  const shoulder = { x: -direction.y, y: direction.x };
+  const position = {
+    x:
+      snapshot.player.body.position.x -
+      direction.x * CAMERA_PROFILE.followDistance +
+      shoulder.x * CAMERA_PROFILE.shoulderOffset,
+    y:
+      snapshot.player.body.position.y -
+      direction.y * CAMERA_PROFILE.followDistance +
+      shoulder.y * CAMERA_PROFILE.shoulderOffset,
+    z: CAMERA_PROFILE.height
+  };
+  const lookAt = {
+    x: snapshot.player.body.position.x + direction.x * CAMERA_PROFILE.lookAhead,
+    y: snapshot.player.body.position.y + direction.y * CAMERA_PROFILE.lookAhead,
+    z: CAMERA_PROFILE.height * 0.45
+  };
+  const forward = normalize3d({
+    x: lookAt.x - position.x,
+    y: lookAt.y - position.y,
+    z: lookAt.z - position.z
+  });
+  const worldUp = { x: 0, y: 0, z: 1 };
+  const right = normalize3d(cross(forward, worldUp));
+  const up = cross(right, forward);
+  return { position, forward, right, up };
+};
+
+const projectPoint = ({ point, center, scale, camera }) => {
+  const relative = {
+    x: point.x - camera.position.x,
+    y: point.y - camera.position.y,
+    z: point.z - camera.position.z
+  };
+  const cameraX = dot(relative, camera.right);
+  const cameraY = dot(relative, camera.up);
+  const cameraZ = dot(relative, camera.forward);
+  const perspective = CAMERA_PROFILE.fov / (CAMERA_PROFILE.fov + cameraZ);
+  return {
+    x: center.x + cameraX * scale * perspective,
+    y: center.y - cameraY * scale * perspective
+  };
+};
+
 const setupDom = () => {
   const handlers = {};
   const canvasContext = stubContext();
@@ -120,8 +202,12 @@ const setupDom = () => {
         handlers[event] = handler;
       }
     },
+    "#health-fill": { style: {} },
+    "#health-value": { textContent: "" },
     "#stamina-fill": { style: {} },
     "#stamina-value": { textContent: "" },
+    "#rival-health-fill": { style: {} },
+    "#rival-health-value": { textContent: "" },
     "#posture": { textContent: "" },
     "#speed": { textContent: "" },
     "#intent": { textContent: "" },
@@ -192,6 +278,8 @@ describe("client main", () => {
 
     expect(mockSession.step).toHaveBeenCalled();
     expect(mockSession.reset).toHaveBeenCalled();
+    expect(elements["#health-value"].textContent).toContain("/");
+    expect(elements["#rival-health-value"].textContent).toContain("/");
     expect(elements["#stamina-value"].textContent).toContain("/");
     expect(elements["#posture"].textContent.length).toBeGreaterThan(0);
     expect(elements["#motion"].textContent).toBe("Full");
@@ -247,26 +335,9 @@ describe("client main", () => {
     rafCallbacks.shift()(start);
     rafCallbacks.shift()(start + 16);
 
-    const toRival = {
-      x: snapshot.rival.body.position.x - snapshot.player.body.position.x,
-      y: snapshot.rival.body.position.y - snapshot.player.body.position.y
-    };
-    const distance = Math.hypot(toRival.x, toRival.y) || 1;
-    const direction = { x: toRival.x / distance, y: toRival.y / distance };
-    const shoulder = { x: -direction.y, y: direction.x };
-    const focusDistance = distance * CAMERA_PROFILE.focusAheadRatio;
-    const focus = {
-      x:
-        snapshot.player.body.position.x +
-        direction.x * focusDistance +
-        shoulder.x * CAMERA_PROFILE.shoulderOffset,
-      y:
-        snapshot.player.body.position.y +
-        direction.y * focusDistance +
-        shoulder.y * CAMERA_PROFILE.shoulderOffset
-    };
     const center = { x: 960 * CAMERA_PROFILE.centerBiasX, y: 640 * CAMERA_PROFILE.centerBiasY };
     const scale = (Math.min(960, 640) / (snapshot.arenaRadius * 2)) * CAMERA_PROFILE.zoomScale;
+    const camera = computeCameraRig(snapshot);
     const postureHeight = snapshot.player.model.posture === "fallen"
       ? ACTOR_HEIGHTS.fallen
       : snapshot.player.model.posture === "stumbling"
@@ -283,17 +354,7 @@ describe("client main", () => {
       y: anchor.y + Math.sin(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE,
       z: handHeight + snapshot.weapons.player.pose.swingPhase * 0.2
     };
-    const projectPoint = (point) => {
-      const relativeX = point.x - focus.x;
-      const relativeY = point.y - focus.y;
-      const isoX = (relativeX - relativeY) * 0.7;
-      const isoY = (relativeX + relativeY) * 0.35 - point.z * 0.75;
-      return {
-        x: center.x + isoX * scale,
-        y: center.y + isoY * scale
-      };
-    };
-    const expectedTip = projectPoint(tip);
+    const expectedTip = projectPoint({ point: tip, center, scale, camera });
 
     const matched = canvasContext.lineTo.mock.calls.some(
       ([x, y]) => Math.abs(x - expectedTip.x) < 0.1 && Math.abs(y - expectedTip.y) < 0.1
@@ -335,26 +396,9 @@ describe("client main", () => {
     rafCallbacks.shift()(start);
     rafCallbacks.shift()(start + 16);
 
-    const toRival = {
-      x: snapshot.rival.body.position.x - snapshot.player.body.position.x,
-      y: snapshot.rival.body.position.y - snapshot.player.body.position.y
-    };
-    const distance = Math.hypot(toRival.x, toRival.y) || 1;
-    const direction = { x: toRival.x / distance, y: toRival.y / distance };
-    const shoulder = { x: -direction.y, y: direction.x };
-    const focusDistance = distance * CAMERA_PROFILE.focusAheadRatio;
-    const focus = {
-      x:
-        snapshot.player.body.position.x +
-        direction.x * focusDistance +
-        shoulder.x * CAMERA_PROFILE.shoulderOffset,
-      y:
-        snapshot.player.body.position.y +
-        direction.y * focusDistance +
-        shoulder.y * CAMERA_PROFILE.shoulderOffset
-    };
     const center = { x: 960 * CAMERA_PROFILE.centerBiasX, y: 640 * CAMERA_PROFILE.centerBiasY };
     const scale = (Math.min(960, 640) / (snapshot.arenaRadius * 2)) * CAMERA_PROFILE.zoomScale;
+    const camera = computeCameraRig(snapshot);
     const postureHeight = snapshot.player.model.posture === "fallen"
       ? ACTOR_HEIGHTS.fallen
       : snapshot.player.model.posture === "stumbling"
@@ -373,14 +417,7 @@ describe("client main", () => {
         + Math.cos(snapshot.weapons.player.pose.angle) * point.y * geometryScale,
       z: handHeight + snapshot.weapons.player.pose.swingPhase * 0.2
     };
-    const relativeX = rotated.x - focus.x;
-    const relativeY = rotated.y - focus.y;
-    const isoX = (relativeX - relativeY) * 0.7;
-    const isoY = (relativeX + relativeY) * 0.35 - rotated.z * 0.75;
-    const expected = {
-      x: center.x + isoX * scale,
-      y: center.y + isoY * scale
-    };
+    const expected = projectPoint({ point: rotated, center, scale, camera });
 
     const matched = canvasContext.lineTo.mock.calls.some(
       ([x, y]) => Math.abs(x - expected.x) < 0.1 && Math.abs(y - expected.y) < 0.1

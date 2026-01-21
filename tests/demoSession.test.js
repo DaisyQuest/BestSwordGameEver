@@ -17,7 +17,12 @@ const {
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,
-  normalizeBodyConfig
+  normalizeBodyConfig,
+  selectHitPart,
+  selectHitOrgan,
+  resolveAttackType,
+  computeImpactVelocity,
+  computeCombatantHealth
 } = __testables;
 
 describe("demoSession", () => {
@@ -126,6 +131,28 @@ describe("demoSession", () => {
     expect(nextStep.weapons.player.weapon.type).toBe("mace");
   });
 
+  it("applies combat damage and updates health", () => {
+    const session = createDemoSession({
+      arenaRadius: 6,
+      spawnOffset: 0.1,
+      stamina: { max: 40, current: 40 },
+      balance: { impactThreshold: 0 },
+      physics: { gravity: { x: 0, y: 0 }, maxSpeed: 20 }
+    });
+
+    let step = null;
+    for (let i = 0; i < 3; i += 1) {
+      step = session.step(200, [], { weapon: { attack: true } });
+      if (step.hits.length > 0) {
+        break;
+      }
+    }
+    expect(step.hits.length).toBeGreaterThan(0);
+    const playerStrike = step.hits.find((hit) => hit.attackerId === "hero");
+    expect(playerStrike).toBeDefined();
+    expect(step.health.rival.current).toBeLessThan(step.health.rival.max);
+  });
+
   it("covers helper utilities", () => {
     expect(normalizeStepOptions().sprint).toBe(false);
     expect(normalizeStepOptions(undefined).sprint).toBe(false);
@@ -162,6 +189,48 @@ describe("demoSession", () => {
     expect(() => normalizeBodyConfig({ damping: -1 }, "body")).toThrow(RangeError);
     expect(() => normalizeBodyConfig({ mass: 0 }, "body")).toThrow(RangeError);
     expect(normalizeBodyConfig().damping).toBeUndefined();
+
+    const combatant = {
+      parts: {
+        torso: { status: "healthy", maxHealth: 100, current: 80 },
+        leftArm: { status: "severed", maxHealth: 50, current: 0 },
+        rightArm: { status: "healthy", maxHealth: 50, current: 50 },
+        leftLeg: { status: "healthy", maxHealth: 60, current: 60 },
+        rightLeg: { status: "healthy", maxHealth: 60, current: 60 },
+        head: { status: "healthy", maxHealth: 40, current: 40 }
+      },
+      vitals: { isAlive: true, consciousness: "awake" }
+    };
+    expect(selectHitPart(combatant, 0)).toBe("torso");
+    expect(selectHitPart(combatant, 1)).toBe("rightArm");
+    const allSevered = {
+      ...combatant,
+      parts: Object.fromEntries(
+        Object.entries(combatant.parts).map(([key, part]) => [key, { ...part, status: "severed" }])
+      )
+    };
+    expect(selectHitPart(allSevered, 3)).toBe("leftLeg");
+    expect(selectHitOrgan("head", 1, true)).toBe("brain");
+    expect(selectHitOrgan("torso", 2, true)).toBe("heart");
+    expect(selectHitOrgan("torso", 3, true)).toBe("lungs");
+    expect(selectHitOrgan("leftArm", 1, true)).toBeUndefined();
+    expect(resolveAttackType("spear")).toBe("thrust");
+    expect(resolveAttackType("mace")).toBe("blunt");
+    expect(resolveAttackType("sword")).toBe("slash");
+
+    const impactVelocity = computeImpactVelocity({
+      attackerBody: { velocity: { x: 1, y: 0 } },
+      defenderBody: { velocity: { x: 0, y: 0 } },
+      weaponPose: { swingPhase: 0.5 }
+    });
+    expect(impactVelocity).toBeGreaterThan(1);
+
+    const health = computeCombatantHealth(combatant);
+    expect(health.current).toBe(290);
+    expect(health.max).toBe(360);
+    expect(health.vitals.isAlive).toBe(true);
+    const emptyHealth = computeCombatantHealth({ parts: {}, vitals: { isAlive: false } });
+    expect(emptyHealth.ratio).toBe(0);
   });
 
   it("builds weapons and weapon poses", () => {
