@@ -36,6 +36,7 @@ const ACTOR_RENDER = {
   headRadius: 14
 };
 const WEAPON_RENDER_SCALE = 1.35;
+const AIM_HEIGHT_MAX = ACTOR_RENDER.height.steady + 0.6;
 
 const inputState = new Set();
 let lastTime = null;
@@ -229,6 +230,7 @@ const computeCameraRig = (frame) => {
   };
   const direction = normalize2d(toRival);
   const shoulder = { x: -direction.y, y: direction.x };
+  const playerHeight = frame.player.body.position.z;
   const position = {
     x:
       frame.player.body.position.x -
@@ -238,12 +240,12 @@ const computeCameraRig = (frame) => {
       frame.player.body.position.y -
       direction.y * CAMERA_PROFILE.followDistance +
       shoulder.y * CAMERA_PROFILE.shoulderOffset,
-    z: CAMERA_PROFILE.height
+    z: playerHeight + CAMERA_PROFILE.height
   };
   const lookAt = {
     x: frame.player.body.position.x + direction.x * CAMERA_PROFILE.lookAhead,
     y: frame.player.body.position.y + direction.y * CAMERA_PROFILE.lookAhead,
-    z: CAMERA_PROFILE.height * 0.45
+    z: playerHeight + CAMERA_PROFILE.height * 0.45
   };
   const forward = normalize3d({
     x: lookAt.x - position.x,
@@ -307,7 +309,8 @@ const unprojectPoint = (screen, center, scale, camera) => {
   }
   return {
     x: camera.position.x + worldDirection.x * t,
-    y: camera.position.y + worldDirection.y * t
+    y: camera.position.y + worldDirection.y * t,
+    z: 0
   };
 };
 
@@ -363,13 +366,13 @@ const drawArenaFloor = (center, scale, radius, camera) => {
 const drawActor = (center, scale, camera, actor, color, { glow = 12 } = {}) => {
   const postureHeight = getPostureHeight(actor.model.posture);
   const position = projectPoint(
-    { x: actor.body.position.x, y: actor.body.position.y, z: 0 },
+    { x: actor.body.position.x, y: actor.body.position.y, z: actor.body.position.z },
     center,
     scale,
     camera
   );
   const head = projectPoint(
-    { x: actor.body.position.x, y: actor.body.position.y, z: postureHeight },
+    { x: actor.body.position.x, y: actor.body.position.y, z: actor.body.position.z + postureHeight },
     center,
     scale,
     camera
@@ -413,17 +416,20 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
   const postureHeight = getPostureHeight(actor.model.posture);
   const handHeight = postureHeight * 0.7;
   const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
+  const pitch = pose.pitch ?? 0;
   const renderReach = reach * WEAPON_RENDER_SCALE;
+  const horizontalReach = renderReach * Math.cos(pitch);
+  const zOffset = renderReach * Math.sin(pitch);
   const geometryScale = weapon.length > 0 ? renderReach / weapon.length : 1;
   const anchor = {
     x: actor.body.position.x,
     y: actor.body.position.y,
-    z: handHeight
+    z: actor.body.position.z + handHeight
   };
   const tip = {
-    x: anchor.x + Math.cos(pose.angle) * renderReach,
-    y: anchor.y + Math.sin(pose.angle) * renderReach,
-    z: handHeight + pose.swingPhase * 0.2
+    x: anchor.x + Math.cos(pose.angle) * horizontalReach,
+    y: anchor.y + Math.sin(pose.angle) * horizontalReach,
+    z: anchor.z + pose.swingPhase * 0.2 + zOffset
   };
 
   const anchorPoint = projectPoint(anchor, center, scale, camera);
@@ -437,7 +443,7 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
       const rotated = {
         x: anchor.x + Math.cos(pose.angle) * point.x * geometryScale - Math.sin(pose.angle) * point.y * geometryScale,
         y: anchor.y + Math.sin(pose.angle) * point.x * geometryScale + Math.cos(pose.angle) * point.y * geometryScale,
-        z: handHeight + pose.swingPhase * 0.2
+        z: anchor.z + pose.swingPhase * 0.2 + zOffset
       };
       return projectPoint(rotated, center, scale, camera);
     });
@@ -469,7 +475,10 @@ const drawWeaponTrail = (center, scale, camera, actor, weaponState, color) => {
   const postureHeight = getPostureHeight(actor.model.posture);
   const handHeight = postureHeight * 0.7;
   const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
+  const pitch = pose.pitch ?? 0;
   const renderReach = reach * WEAPON_RENDER_SCALE;
+  const horizontalReach = renderReach * Math.cos(pitch);
+  const zOffset = renderReach * Math.sin(pitch);
   const trailSpread = 0.7;
   const startAngle = pose.angle - trailSpread / 2;
   const endAngle = pose.angle + trailSpread / 2;
@@ -483,9 +492,9 @@ const drawWeaponTrail = (center, scale, camera, actor, weaponState, color) => {
     const t = i / segments;
     const angle = startAngle + (endAngle - startAngle) * t;
     const tip = {
-      x: actor.body.position.x + Math.cos(angle) * renderReach,
-      y: actor.body.position.y + Math.sin(angle) * renderReach,
-      z: handHeight + pose.swingPhase * 0.2
+      x: actor.body.position.x + Math.cos(angle) * horizontalReach,
+      y: actor.body.position.y + Math.sin(angle) * horizontalReach,
+      z: actor.body.position.z + handHeight + pose.swingPhase * 0.2 + zOffset
     };
     const projected = projectPoint(tip, center, scale, camera);
     if (i === 0) {
@@ -534,7 +543,7 @@ const drawSpeedStreaks = (center, scale, camera, actor, speed, color) => {
       {
         x: actor.body.position.x + Math.cos(angle) * 0.4,
         y: actor.body.position.y + Math.sin(angle) * 0.4,
-        z: 0.3
+        z: actor.body.position.z + 0.3
       },
       center,
       scale,
@@ -544,7 +553,7 @@ const drawSpeedStreaks = (center, scale, camera, actor, speed, color) => {
       {
         x: actor.body.position.x + Math.cos(angle) * 1.2,
         y: actor.body.position.y + Math.sin(angle) * 1.2,
-        z: 0.1
+        z: actor.body.position.z + 0.1
       },
       center,
       scale,
@@ -625,6 +634,10 @@ const loop = (timestamp) => {
   const aimTarget = pointerState.active
     ? unprojectPoint({ x: pointerState.x, y: pointerState.y }, center, baseScale, camera)
     : null;
+  if (aimTarget) {
+    const normalizedY = Math.max(0, Math.min(1, 1 - pointerState.y / height));
+    aimTarget.z = normalizedY * AIM_HEIGHT_MAX;
+  }
   const attackActive =
     pointerState.attack || inputState.has("Space") || inputState.has("KeyF");
   const guardActive = inputState.has("KeyQ");
@@ -636,7 +649,7 @@ const loop = (timestamp) => {
       guard: guardActive
     }
   });
-  const speed = Math.hypot(state.player.body.velocity.x, state.player.body.velocity.y);
+  const speed = Math.hypot(state.player.body.velocity.x, state.player.body.velocity.y, state.player.body.velocity.z);
   const frame = { ...state, speed };
   updateHud(frame);
   render(frame);

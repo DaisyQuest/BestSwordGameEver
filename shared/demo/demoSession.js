@@ -48,8 +48,9 @@ const normalizeStepOptions = (options = {}) => {
     if (!options.weapon.aim || typeof options.weapon.aim !== "object" || Array.isArray(options.weapon.aim)) {
       throw new TypeError("options.weapon.aim must be an object");
     }
-    if (!Number.isFinite(options.weapon.aim.x) || !Number.isFinite(options.weapon.aim.y)) {
-      throw new RangeError("options.weapon.aim must include finite x and y");
+    const aimZ = options.weapon.aim.z ?? 0;
+    if (!Number.isFinite(options.weapon.aim.x) || !Number.isFinite(options.weapon.aim.y) || !Number.isFinite(aimZ)) {
+      throw new RangeError("options.weapon.aim must include finite x, y, and z");
     }
   }
   return {
@@ -81,8 +82,8 @@ const buildSpawnPositions = (arenaRadius, spawnOffset) => {
     throw new RangeError("spawnOffset must be less than arenaRadius");
   }
   return {
-    player: { x: -spawnOffset, y: 0 },
-    rival: { x: spawnOffset, y: 0 }
+    player: { x: -spawnOffset, y: 0, z: 0 },
+    rival: { x: spawnOffset, y: 0, z: 0 }
   };
 };
 
@@ -109,6 +110,23 @@ const HIT_PART_ORDER = ["torso", "leftArm", "rightArm", "leftLeg", "rightLeg", "
 const HIT_COOLDOWN_MS = 320;
 const HIT_PHASE = 0.55;
 const HIT_RANGE_PADDING = 0.4;
+const POSTURE_HEIGHT = {
+  fallen: 0.6,
+  stumbling: 1.4,
+  steady: 1.9
+};
+const WEAPON_HAND_HEIGHT_RATIO = 0.7;
+const WEAPON_SWING_HEIGHT = 0.2;
+
+const getPostureHeight = (posture) => {
+  if (posture === "fallen") {
+    return POSTURE_HEIGHT.fallen;
+  }
+  if (posture === "stumbling") {
+    return POSTURE_HEIGHT.stumbling;
+  }
+  return POSTURE_HEIGHT.steady;
+};
 
 const buildRivalIntent = (elapsedMs) => {
   const t = elapsedMs / 1000;
@@ -181,13 +199,16 @@ const resolveAttackType = (weaponType) => {
   return "slash";
 };
 
-const computeImpactVelocity = ({ attackerBody, defenderBody, weaponPose }) => {
+const computeImpactVelocity = ({ attackerBody, defenderBody, weaponPose, striking = true }) => {
   const relativeSpeed = Math.hypot(
     attackerBody.velocity.x - defenderBody.velocity.x,
-    attackerBody.velocity.y - defenderBody.velocity.y
+    attackerBody.velocity.y - defenderBody.velocity.y,
+    attackerBody.velocity.z - defenderBody.velocity.z
   );
   const swingBoost = 2 + weaponPose.swingPhase * 6;
-  return Math.max(1, relativeSpeed + swingBoost);
+  const baseVelocity = relativeSpeed + (striking ? swingBoost : 0.6);
+  const velocityScale = striking ? 1 : 0.45;
+  return Math.max(0.6, baseVelocity * velocityScale);
 };
 
 const computeCombatantHealth = (combatant) => {
@@ -289,6 +310,7 @@ const computeWeaponPose = (
 
   return {
     angle,
+    pitch: 0,
     reach,
     swingPhase,
     swinging: swingPhase > 0.55,
@@ -303,10 +325,11 @@ const normalizeAimInput = (aim) => {
   if (!aim || typeof aim !== "object" || Array.isArray(aim)) {
     throw new TypeError("aim must be an object");
   }
-  if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y)) {
-    throw new RangeError("aim must include finite x and y");
+  const z = aim.z ?? 0;
+  if (!Number.isFinite(aim.x) || !Number.isFinite(aim.y) || !Number.isFinite(z)) {
+    throw new RangeError("aim must include finite x, y, and z");
   }
-  return aim;
+  return { x: aim.x, y: aim.y, z };
 };
 
 const normalizeWeaponIntent = (value) => {
@@ -362,14 +385,54 @@ const computeAimTarget = ({ aim, inputs, playerBody, rivalBody }) => {
   if (direction) {
     return {
       x: playerBody.position.x + direction.x,
-      y: playerBody.position.y + direction.y
+      y: playerBody.position.y + direction.y,
+      z: playerBody.position.z
     };
   }
-  return { x: rivalBody.position.x, y: rivalBody.position.y };
+  return { x: rivalBody.position.x, y: rivalBody.position.y, z: rivalBody.position.z };
 };
 
 const computeAimAngle = ({ aimTarget, playerBody }) =>
   Math.atan2(aimTarget.y - playerBody.position.y, aimTarget.x - playerBody.position.x);
+
+const computeAimPitch = ({ aimTarget, playerBody }) => {
+  const dx = aimTarget.x - playerBody.position.x;
+  const dy = aimTarget.y - playerBody.position.y;
+  const dz = aimTarget.z - playerBody.position.z;
+  const horizontal = Math.hypot(dx, dy);
+  if (horizontal <= 0) {
+    return dz > 0 ? Math.PI / 2 : dz < 0 ? -Math.PI / 2 : 0;
+  }
+  return Math.atan2(dz, horizontal);
+};
+
+const distanceToSegment3d = (point, start, end) => {
+  const seg = {
+    x: end.x - start.x,
+    y: end.y - start.y,
+    z: end.z - start.z
+  };
+  const toPoint = {
+    x: point.x - start.x,
+    y: point.y - start.y,
+    z: point.z - start.z
+  };
+  const segLengthSq = seg.x * seg.x + seg.y * seg.y + seg.z * seg.z;
+  if (segLengthSq <= 0) {
+    return Math.hypot(toPoint.x, toPoint.y, toPoint.z);
+  }
+  const t = Math.max(0, Math.min(1, (toPoint.x * seg.x + toPoint.y * seg.y + toPoint.z * seg.z) / segLengthSq));
+  const closest = {
+    x: start.x + seg.x * t,
+    y: start.y + seg.y * t,
+    z: start.z + seg.z * t
+  };
+  return Math.hypot(
+    point.x - closest.x,
+    point.y - closest.y,
+    point.z - closest.z
+  );
+};
 
 const computeSwingDuration = ({ weapon, model, guard }) => {
   if (!weapon || typeof weapon !== "object") {
@@ -420,6 +483,7 @@ const computeControlledWeaponPose = ({
   elapsedMs,
   deltaMs,
   aimAngle,
+  aimPitch = 0,
   attackActive,
   guardActive,
   swingState
@@ -442,6 +506,7 @@ const computeControlledWeaponPose = ({
 
   return {
     angle,
+    pitch: aimPitch,
     reach,
     swingPhase: swingUpdate.swingPhase,
     swinging: swingUpdate.swinging,
@@ -479,6 +544,7 @@ const buildWeaponState = ({
         elapsedMs,
         deltaMs,
         aimAngle: control.aimAngle,
+        aimPitch: control.aimPitch ?? 0,
         attackActive: control.attackActive,
         guardActive: control.guardActive,
         swingState
@@ -523,7 +589,7 @@ export const createDemoSession = ({
   }
 
   const resolvedPhysics = {
-    gravity: { x: 0, y: 0 },
+    gravity: { x: 0, y: 0, z: 0 },
     maxSpeed: 14,
     ...normalizeObject(physics, "physics")
   };
@@ -608,6 +674,7 @@ export const createDemoSession = ({
     const impulseScale = resolved * 0.02;
     body.velocity.x += (direction.x * impulseScale) / body.mass;
     body.velocity.y += (direction.y * impulseScale) / body.mass;
+    body.velocity.z += (direction.z * impulseScale) / body.mass;
   };
 
   const evaluateStrike = ({
@@ -616,6 +683,8 @@ export const createDemoSession = ({
     weaponState,
     attackerBody,
     defenderBody,
+    attackerModel,
+    defenderModel,
     defenderCombatant,
     clockMs
   }) => {
@@ -625,24 +694,50 @@ export const createDemoSession = ({
     }
     const lastSwingPhase = lastSwingPhases[attackerId];
     lastSwingPhases[attackerId] = pose.swingPhase;
-    if (!pose.swinging || lastSwingPhase >= HIT_PHASE || pose.swingPhase < HIT_PHASE) {
+    const isSwinging = pose.swinging;
+    const isStrikeWindow =
+      isSwinging && lastSwingPhase < HIT_PHASE && pose.swingPhase >= HIT_PHASE;
+    const isPassiveContact = !isSwinging;
+    if (!isStrikeWindow && !isPassiveContact) {
       return null;
     }
     if (clockMs - lastHitTimes[attackerId] < HIT_COOLDOWN_MS) {
       return null;
     }
-    const distance = Math.hypot(
-      attackerBody.position.x - defenderBody.position.x,
-      attackerBody.position.y - defenderBody.position.y
-    );
     const reach = Number.isFinite(pose.reach) ? pose.reach : weaponState.weapon.length;
-    if (distance > reach + HIT_RANGE_PADDING) {
+    const pitch = pose.pitch ?? 0;
+    const horizontalReach = reach * Math.cos(pitch);
+    const zOffset = reach * Math.sin(pitch);
+    const attackerHandHeight = getPostureHeight(attackerModel.posture) * WEAPON_HAND_HEIGHT_RATIO;
+    const attackerHand = {
+      x: attackerBody.position.x,
+      y: attackerBody.position.y,
+      z: attackerBody.position.z + attackerHandHeight + WEAPON_SWING_HEIGHT
+    };
+    const attackerTip = {
+      x: attackerHand.x + Math.cos(pose.angle) * horizontalReach,
+      y: attackerHand.y + Math.sin(pose.angle) * horizontalReach,
+      z: attackerHand.z + zOffset
+    };
+    const defenderCenterHeight = getPostureHeight(defenderModel.posture) * WEAPON_HAND_HEIGHT_RATIO;
+    const defenderTarget = {
+      x: defenderBody.position.x,
+      y: defenderBody.position.y,
+      z: defenderBody.position.z + defenderCenterHeight
+    };
+    const distance = distanceToSegment3d(defenderTarget, attackerHand, attackerTip);
+    if (distance > HIT_RANGE_PADDING) {
       return null;
     }
 
     const attackType = resolveAttackType(weaponState.weapon.type);
-    const velocity = computeImpactVelocity({ attackerBody, defenderBody, weaponPose: pose });
-    const weakPoint = pose.swingPhase > 0.85;
+    const velocity = computeImpactVelocity({
+      attackerBody,
+      defenderBody,
+      weaponPose: pose,
+      striking: isSwinging
+    });
+    const weakPoint = isSwinging && pose.swingPhase > 0.85;
     const part = selectHitPart(defenderCombatant, stepIndex);
     const impact = computeWeaponImpact({ weapon: weaponState.weapon, velocity, attackType, weakPoint });
     const hit = {
@@ -656,10 +751,15 @@ export const createDemoSession = ({
     playerSystem.applyDamageReport(defenderId, report);
     const direction = {
       x: defenderBody.position.x - attackerBody.position.x,
-      y: defenderBody.position.y - attackerBody.position.y
+      y: defenderBody.position.y - attackerBody.position.y,
+      z: defenderBody.position.z - attackerBody.position.z
     };
-    const dirLength = Math.hypot(direction.x, direction.y) || 1;
-    applyImpulse(defenderBody, { x: direction.x / dirLength, y: direction.y / dirLength }, hit.amount);
+    const dirLength = Math.hypot(direction.x, direction.y, direction.z) || 1;
+    applyImpulse(
+      defenderBody,
+      { x: direction.x / dirLength, y: direction.y / dirLength, z: direction.z / dirLength },
+      hit.amount
+    );
     lastHitTimes[attackerId] = clockMs;
     return {
       attackerId,
@@ -690,6 +790,10 @@ export const createDemoSession = ({
         guard: false,
         aimAngle: computeAimAngle({
           aimTarget: { x: rivalBody.position.x, y: rivalBody.position.y },
+          playerBody
+        }),
+        aimPitch: computeAimPitch({
+          aimTarget: { x: rivalBody.position.x, y: rivalBody.position.y, z: rivalBody.position.z },
           playerBody
         })
       },
@@ -787,6 +891,7 @@ export const createDemoSession = ({
       rivalBody
     });
     const aimAngle = computeAimAngle({ aimTarget, playerBody });
+    const aimPitch = computeAimPitch({ aimTarget, playerBody });
     const attackActive = weaponIntent.attack ?? (inputHas(resolvedInputs, "Space") || inputHas(resolvedInputs, "KeyF"));
     const guardActive = weaponIntent.guard ?? inputHas(resolvedInputs, "KeyQ");
 
@@ -796,6 +901,7 @@ export const createDemoSession = ({
       elapsedMs,
       control: {
         aimAngle,
+        aimPitch,
         attackActive,
         guardActive
       },
@@ -816,6 +922,8 @@ export const createDemoSession = ({
       weaponState: playerWeaponState,
       attackerBody: playerBody,
       defenderBody: rivalBody,
+      attackerModel: playerRecord.model,
+      defenderModel: rivalRecord.model,
       defenderCombatant: combatants.rival,
       clockMs: elapsedMs
     });
@@ -828,6 +936,8 @@ export const createDemoSession = ({
       weaponState: rivalWeaponState,
       attackerBody: rivalBody,
       defenderBody: playerBody,
+      attackerModel: rivalRecord.model,
+      defenderModel: playerRecord.model,
       defenderCombatant: combatants.player,
       clockMs: elapsedMs
     });
@@ -848,7 +958,8 @@ export const createDemoSession = ({
       weaponControl: {
         attack: attackActive,
         guard: guardActive,
-        aimAngle
+        aimAngle,
+        aimPitch
       },
       clamped: {
         player: playerClamped,
@@ -919,6 +1030,8 @@ export const __testables = {
   readAimDirectionFromInputs,
   computeAimTarget,
   computeAimAngle,
+  computeAimPitch,
+  distanceToSegment3d,
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,

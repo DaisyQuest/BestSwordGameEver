@@ -14,13 +14,13 @@ describe("movementSystem", () => {
 
     const idle = controller.computeForce({ move: { x: 0.05, y: 0 } });
     expect(idle.applied).toBe(false);
-    expect(idle.force).toEqual({ x: 0, y: 0 });
+    expect(idle.force).toEqual({ x: 0, y: 0, z: 0 });
 
-    const normal = controller.computeForce({ move: { x: 0.6, y: 0.8 } });
+    const normal = controller.computeForce({ move: { x: 0.6, y: 0.8, z: 0.4 } });
     expect(normal.applied).toBe(true);
-    expect(Math.hypot(normal.force.x, normal.force.y)).toBeCloseTo(10);
+    expect(Math.hypot(normal.force.x, normal.force.y, normal.force.z)).toBeCloseTo(10);
 
-    const over = controller.computeForce({ move: { x: 2, y: 0 } });
+    const over = controller.computeForce({ move: { x: 2, y: 0, z: 0 } });
     expect(over.force.x).toBeCloseTo(10);
   });
 
@@ -34,6 +34,7 @@ describe("movementSystem", () => {
     const controller = createMovementController({ maxAcceleration: 10 });
     const scaled = controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: 0.5 });
     expect(scaled.force.x).toBeCloseTo(5);
+    expect(scaled.force.z).toBeCloseTo(0);
 
     const defaultMultiplier = controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: null });
     expect(defaultMultiplier.force.x).toBeCloseTo(10);
@@ -44,6 +45,7 @@ describe("movementSystem", () => {
     expect(() => controller.computeForce()).toThrow(TypeError);
     expect(() => controller.computeForce({})).toThrow(TypeError);
     expect(() => controller.computeForce({ move: { x: "1", y: 0 } })).toThrow(RangeError);
+    expect(() => controller.computeForce({ move: { x: 1, y: 0, z: "no" } })).toThrow(RangeError);
     expect(() => controller.computeForce({ move: { x: 1, y: 0 } }, { sprint: "yes" })).toThrow(TypeError);
     expect(() =>
       controller.computeForce({ move: { x: 1, y: 0 } }, { forceMultiplier: 2 })
@@ -56,9 +58,9 @@ describe("movementSystem", () => {
 
     const result = controller.applyMovement(world, "runner", { move: { x: 1, y: 0 } });
     expect(result.applied).toBe(true);
-    expect(world.applyForce).toHaveBeenCalledWith("runner", { x: 5, y: 0 });
+    expect(world.applyForce).toHaveBeenCalledWith("runner", { x: 5, y: 0, z: 0 });
 
-    const idle = controller.applyMovement(world, "runner", { move: { x: 0, y: 0 } });
+    const idle = controller.applyMovement(world, "runner", { move: { x: 0, y: 0, z: 0 } });
     expect(idle.applied).toBe(false);
   });
 

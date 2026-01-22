@@ -48,8 +48,8 @@ const buildSnapshot = ({
   },
   player: {
     body: {
-      position: { x: 0, y: 0 },
-      velocity: { x: 1, y: 1 }
+      position: { x: 0, y: 0, z: 0.4 },
+      velocity: { x: 1, y: 1, z: 0 }
     },
     model: {
       stamina: { max, current: exhausted ? 10 : 80, exhausted },
@@ -58,8 +58,8 @@ const buildSnapshot = ({
   },
   rival: {
     body: {
-      position: { x: 2, y: 0 },
-      velocity: { x: 0, y: 0 }
+      position: { x: 2, y: 0, z: 0.4 },
+      velocity: { x: 0, y: 0, z: 0 }
     },
     model: {
       stamina: { max, current: max, exhausted: false },
@@ -69,10 +69,11 @@ const buildSnapshot = ({
   weaponControl: weaponControl ?? {
     attack: false,
     guard: false,
-    aimAngle: 0.4
+    aimAngle: 0.4,
+    aimPitch: 0
   },
   intent: {
-    move: { x: 0.5, y: 0.2 }
+    move: { x: 0.5, y: 0.2, z: 0 }
   },
   weapons: weapons
     ? {
@@ -82,14 +83,14 @@ const buildSnapshot = ({
           length: 1.2,
           geometry: geometry ? { points: [{ x: 0, y: 0.1 }, { x: 1, y: 0 }, { x: 0, y: -0.1 }] } : null
         },
-        pose: { angle: 0.3, swingPhase: 0.2, swinging: false, reach }
+        pose: { angle: 0.3, pitch: 0, swingPhase: 0.2, swinging: false, reach }
       },
       rival: {
         weapon: {
           length: 1.6,
           geometry: { points: [{ x: 0, y: 0.2 }, { x: 1.2, y: 0 }, { x: 0, y: -0.2 }] }
         },
-        pose: { angle: 1.4, swingPhase: 0.7, swinging: true, reach }
+        pose: { angle: 1.4, pitch: 0, swingPhase: 0.7, swinging: true, reach }
       }
     }
     : null
@@ -148,6 +149,7 @@ const computeCameraRig = (snapshot) => {
   };
   const direction = normalize2d(toRival);
   const shoulder = { x: -direction.y, y: direction.x };
+  const playerHeight = snapshot.player.body.position.z;
   const position = {
     x:
       snapshot.player.body.position.x -
@@ -157,12 +159,12 @@ const computeCameraRig = (snapshot) => {
       snapshot.player.body.position.y -
       direction.y * CAMERA_PROFILE.followDistance +
       shoulder.y * CAMERA_PROFILE.shoulderOffset,
-    z: CAMERA_PROFILE.height
+    z: playerHeight + CAMERA_PROFILE.height
   };
   const lookAt = {
     x: snapshot.player.body.position.x + direction.x * CAMERA_PROFILE.lookAhead,
     y: snapshot.player.body.position.y + direction.y * CAMERA_PROFILE.lookAhead,
-    z: CAMERA_PROFILE.height * 0.45
+    z: playerHeight + CAMERA_PROFILE.height * 0.45
   };
   const forward = normalize3d({
     x: lookAt.x - position.x,
@@ -344,15 +346,18 @@ describe("client main", () => {
         ? ACTOR_HEIGHTS.stumbling
         : ACTOR_HEIGHTS.steady;
     const handHeight = postureHeight * 0.7;
+    const pitch = snapshot.weapons.player.pose.pitch ?? 0;
+    const horizontalReach = snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE * Math.cos(pitch);
+    const zOffset = snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE * Math.sin(pitch);
     const anchor = {
       x: snapshot.player.body.position.x,
       y: snapshot.player.body.position.y,
-      z: handHeight
+      z: snapshot.player.body.position.z + handHeight
     };
     const tip = {
-      x: anchor.x + Math.cos(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE,
-      y: anchor.y + Math.sin(snapshot.weapons.player.pose.angle) * snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE,
-      z: handHeight + snapshot.weapons.player.pose.swingPhase * 0.2
+      x: anchor.x + Math.cos(snapshot.weapons.player.pose.angle) * horizontalReach,
+      y: anchor.y + Math.sin(snapshot.weapons.player.pose.angle) * horizontalReach,
+      z: anchor.z + snapshot.weapons.player.pose.swingPhase * 0.2 + zOffset
     };
     const expectedTip = projectPoint({ point: tip, center, scale, camera });
 
@@ -405,6 +410,8 @@ describe("client main", () => {
         ? ACTOR_HEIGHTS.stumbling
         : ACTOR_HEIGHTS.steady;
     const handHeight = postureHeight * 0.7;
+    const pitch = snapshot.weapons.player.pose.pitch ?? 0;
+    const zOffset = snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE * Math.sin(pitch);
     const geometryScale = (snapshot.weapons.player.pose.reach * WEAPON_RENDER_SCALE)
       / snapshot.weapons.player.weapon.length;
     const point = snapshot.weapons.player.weapon.geometry.points[1];
@@ -415,7 +422,7 @@ describe("client main", () => {
       y: snapshot.player.body.position.y
         + Math.sin(snapshot.weapons.player.pose.angle) * point.x * geometryScale
         + Math.cos(snapshot.weapons.player.pose.angle) * point.y * geometryScale,
-      z: handHeight + snapshot.weapons.player.pose.swingPhase * 0.2
+      z: snapshot.player.body.position.z + handHeight + snapshot.weapons.player.pose.swingPhase * 0.2 + zOffset
     };
     const expected = projectPoint({ point: rotated, center, scale, camera });
 

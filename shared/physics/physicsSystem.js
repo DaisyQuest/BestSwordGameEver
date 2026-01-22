@@ -3,13 +3,14 @@ const normalizeVec = (value, label) => {
     throw new TypeError(`${label} must be an object`);
   }
   const { x, y } = value;
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new RangeError(`${label} must have finite x/y`);
+  const z = value.z ?? 0;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    throw new RangeError(`${label} must have finite x/y/z`);
   }
-  return { x, y };
+  return { x, y, z };
 };
 
-export const createPhysicsWorld = ({ gravity = { x: 0, y: -9.8 }, maxSpeed = 20 } = {}) => {
+export const createPhysicsWorld = ({ gravity = { x: 0, y: 0, z: -9.8 }, maxSpeed = 20 } = {}) => {
   const resolvedGravity = normalizeVec(gravity, "gravity");
   if (!Number.isFinite(maxSpeed) || maxSpeed <= 0) {
     throw new RangeError("maxSpeed must be a positive number");
@@ -17,7 +18,13 @@ export const createPhysicsWorld = ({ gravity = { x: 0, y: -9.8 }, maxSpeed = 20 
 
   const bodies = new Map();
 
-  const createBody = ({ id, mass = 1, position = { x: 0, y: 0 }, velocity = { x: 0, y: 0 }, damping = 0.98 } = {}) => {
+  const createBody = ({
+    id,
+    mass = 1,
+    position = { x: 0, y: 0, z: 0 },
+    velocity = { x: 0, y: 0, z: 0 },
+    damping = 0.98
+  } = {}) => {
     if (typeof id !== "string" || id.length === 0) {
       throw new TypeError("body id must be a non-empty string");
     }
@@ -36,7 +43,7 @@ export const createPhysicsWorld = ({ gravity = { x: 0, y: -9.8 }, maxSpeed = 20 
       mass,
       position: normalizeVec(position, "position"),
       velocity: normalizeVec(velocity, "velocity"),
-      force: { x: 0, y: 0 },
+      force: { x: 0, y: 0, z: 0 },
       damping
     };
 
@@ -56,6 +63,7 @@ export const createPhysicsWorld = ({ gravity = { x: 0, y: -9.8 }, maxSpeed = 20 
     const resolved = normalizeVec(force, "force");
     body.force.x += resolved.x;
     body.force.y += resolved.y;
+    body.force.z += resolved.z;
   };
 
   const step = (deltaMs) => {
@@ -67,27 +75,33 @@ export const createPhysicsWorld = ({ gravity = { x: 0, y: -9.8 }, maxSpeed = 20 
     for (const body of bodies.values()) {
       const accel = {
         x: resolvedGravity.x + body.force.x / body.mass,
-        y: resolvedGravity.y + body.force.y / body.mass
+        y: resolvedGravity.y + body.force.y / body.mass,
+        z: resolvedGravity.z + body.force.z / body.mass
       };
 
       body.velocity.x += accel.x * dt;
       body.velocity.y += accel.y * dt;
+      body.velocity.z += accel.z * dt;
 
-      const speed = Math.hypot(body.velocity.x, body.velocity.y);
+      const speed = Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z);
       if (speed > maxSpeed) {
         const scale = maxSpeed / speed;
         body.velocity.x *= scale;
         body.velocity.y *= scale;
+        body.velocity.z *= scale;
       }
 
       body.velocity.x *= body.damping;
       body.velocity.y *= body.damping;
+      body.velocity.z *= body.damping;
 
       body.position.x += body.velocity.x * dt;
       body.position.y += body.velocity.y * dt;
+      body.position.z += body.velocity.z * dt;
 
       body.force.x = 0;
       body.force.y = 0;
+      body.force.z = 0;
     }
   };
 
