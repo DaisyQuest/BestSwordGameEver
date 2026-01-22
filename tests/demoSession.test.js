@@ -14,6 +14,8 @@ const {
   readAimDirectionFromInputs,
   computeAimTarget,
   computeAimAngle,
+  computeAimPitch,
+  distanceToSegment3d,
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,
@@ -153,6 +155,28 @@ describe("demoSession", () => {
     expect(step.health.rival.current).toBeLessThan(step.health.rival.max);
   });
 
+  it("records collisions even when the player is not striking", () => {
+    const session = createDemoSession({
+      arenaRadius: 6,
+      spawnOffset: 0.1,
+      stamina: { max: 40, current: 40 },
+      balance: { impactThreshold: 0 },
+      physics: { gravity: { x: 0, y: 0 }, maxSpeed: 20 }
+    });
+
+    let step = null;
+    for (let i = 0; i < 4; i += 1) {
+      step = session.step(200, [], { weapon: { attack: false } });
+      if (step.hits.length > 0) {
+        break;
+      }
+    }
+    expect(step.hits.length).toBeGreaterThan(0);
+    const playerCollision = step.hits.find((hit) => hit.attackerId === "hero");
+    expect(playerCollision).toBeDefined();
+    expect(playerCollision.hit.amount).toBeGreaterThan(0);
+  });
+
   it("covers helper utilities", () => {
     expect(normalizeStepOptions().sprint).toBe(false);
     expect(normalizeStepOptions(undefined).sprint).toBe(false);
@@ -219,11 +243,20 @@ describe("demoSession", () => {
     expect(resolveAttackType("sword")).toBe("slash");
 
     const impactVelocity = computeImpactVelocity({
-      attackerBody: { velocity: { x: 1, y: 0 } },
-      defenderBody: { velocity: { x: 0, y: 0 } },
+      attackerBody: { velocity: { x: 1, y: 0, z: 0 } },
+      defenderBody: { velocity: { x: 0, y: 0, z: 0 } },
       weaponPose: { swingPhase: 0.5 }
     });
     expect(impactVelocity).toBeGreaterThan(1);
+
+    const passiveVelocity = computeImpactVelocity({
+      attackerBody: { velocity: { x: 1, y: 0, z: 0 } },
+      defenderBody: { velocity: { x: 0, y: 0, z: 0 } },
+      weaponPose: { swingPhase: 0.5 },
+      striking: false
+    });
+    expect(passiveVelocity).toBeLessThan(impactVelocity);
+    expect(passiveVelocity).toBeGreaterThan(0);
 
     const health = computeCombatantHealth(combatant);
     expect(health.current).toBe(290);
@@ -258,6 +291,7 @@ describe("demoSession", () => {
     expect(pose.dominantHand).toBe("left");
     expect(pose.reach).toBeGreaterThan(0);
     expect(pose.swinging).toBe(false);
+    expect(pose.pitch).toBeCloseTo(0);
 
     const swingPose = computeWeaponPose(250, {
       weapon: loadout.player,
@@ -310,6 +344,7 @@ describe("demoSession", () => {
     expect(() => normalizeWeaponIntent({ attack: "yes" })).toThrow(TypeError);
     expect(() => normalizeWeaponIntent({ guard: "no" })).toThrow(TypeError);
     expect(() => normalizeWeaponIntent({ aim: { x: "no", y: 2 } })).toThrow(RangeError);
+    expect(() => normalizeWeaponIntent({ aim: { x: 1, y: 2, z: "no" } })).toThrow(RangeError);
     expect(normalizeWeaponIntent().attack).toBeNull();
 
     const inputs = [
@@ -321,8 +356,8 @@ describe("demoSession", () => {
     expect(direction.x).toBeLessThan(0);
     expect(direction.y).toBeGreaterThan(0);
 
-    const playerBody = { position: { x: 1, y: 2 } };
-    const rivalBody = { position: { x: 5, y: 2 } };
+    const playerBody = { position: { x: 1, y: 2, z: 0.4 } };
+    const rivalBody = { position: { x: 5, y: 2, z: 1.2 } };
     const aimTarget = computeAimTarget({
       aim: null,
       inputs,
@@ -333,6 +368,31 @@ describe("demoSession", () => {
     expect(aimTarget.y).toBeGreaterThan(playerBody.position.y);
     const aimAngle = computeAimAngle({ aimTarget, playerBody });
     expect(aimAngle).toBeGreaterThan(0);
+    const aimPitch = computeAimPitch({ aimTarget, playerBody });
+    expect(aimPitch).toBeGreaterThanOrEqual(-Math.PI / 2);
+    expect(aimPitch).toBeLessThanOrEqual(Math.PI / 2);
+
+    const verticalPitch = computeAimPitch({
+      aimTarget: { x: 1, y: 2, z: 3 },
+      playerBody
+    });
+    expect(verticalPitch).toBeGreaterThan(0);
+
+    expect(distanceToSegment3d(
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 },
+      { x: 2, y: 0, z: 0 }
+    )).toBeCloseTo(0);
+    expect(distanceToSegment3d(
+      { x: 1, y: 1, z: 0 },
+      { x: 0, y: 0, z: 0 },
+      { x: 2, y: 0, z: 0 }
+    )).toBeCloseTo(1);
+    expect(distanceToSegment3d(
+      { x: 1, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 },
+      { x: 0, y: 0, z: 0 }
+    )).toBeCloseTo(1);
 
     const swingState = { active: false, progress: 0, direction: 1 };
     expect(() =>
@@ -369,6 +429,7 @@ describe("demoSession", () => {
     });
     expect(controlPose.reach).toBeGreaterThan(0);
     expect(controlPose.swinging).toBe(true);
+    expect(controlPose.pitch).toBeCloseTo(0);
   });
 
   it("validates deltaMs", () => {

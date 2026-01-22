@@ -5,6 +5,7 @@ describe("physicsSystem", () => {
   it("validates world and body configuration", () => {
     expect(() => createPhysicsWorld({ gravity: null })).toThrow(TypeError);
     expect(() => createPhysicsWorld({ gravity: { x: 0, y: "down" } })).toThrow(RangeError);
+    expect(() => createPhysicsWorld({ gravity: { x: 0, y: 0, z: "down" } })).toThrow(RangeError);
     expect(() => createPhysicsWorld({ maxSpeed: 0 })).toThrow(RangeError);
 
     const world = createPhysicsWorld();
@@ -26,8 +27,10 @@ describe("physicsSystem", () => {
     const body = world.getBody("actor");
     expect(body.velocity.x).toBeCloseTo(1);
     expect(body.velocity.y).toBeCloseTo(-5);
+    expect(body.velocity.z).toBeCloseTo(0);
     expect(body.position.x).toBeCloseTo(1);
     expect(body.position.y).toBeCloseTo(-5);
+    expect(body.position.z).toBeCloseTo(0);
   });
 
   it("clamps speed and clears forces", () => {
@@ -38,7 +41,7 @@ describe("physicsSystem", () => {
     world.step(1000);
 
     const body = world.getBody("runner");
-    expect(Math.hypot(body.velocity.x, body.velocity.y)).toBeCloseTo(1);
+    expect(Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z)).toBeCloseTo(1);
 
     world.step(1000);
     expect(body.velocity.x).toBeCloseTo(1);
@@ -50,13 +53,14 @@ describe("physicsSystem", () => {
 
     expect(() => world.step(0)).toThrow(RangeError);
     expect(() => world.applyForce("actor", { x: 0, y: NaN })).toThrow(RangeError);
+    expect(() => world.applyForce("actor", { x: 0, y: 0, z: NaN })).toThrow(RangeError);
     expect(() => world.applyForce("missing", { x: 1, y: 1 })).toThrow(RangeError);
   });
 
   it("removes bodies and snapshots state", () => {
     const world = createPhysicsWorld();
-    world.createBody({ id: "alpha", position: { x: 1, y: 2 } });
-    world.createBody({ id: "beta", position: { x: 3, y: 4 } });
+    world.createBody({ id: "alpha", position: { x: 1, y: 2, z: 1 } });
+    world.createBody({ id: "beta", position: { x: 3, y: 4, z: 2 } });
 
     const snapshot = world.snapshot();
     expect(snapshot).toHaveLength(2);

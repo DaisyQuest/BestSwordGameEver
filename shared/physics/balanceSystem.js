@@ -27,10 +27,11 @@ const validateVelocity = (velocity, label) => {
   if (!velocity || typeof velocity !== "object") {
     throw new TypeError(`${label} must be an object`);
   }
-  if (!Number.isFinite(velocity.x) || !Number.isFinite(velocity.y)) {
-    throw new RangeError(`${label} must have finite x/y`);
+  const z = velocity.z ?? 0;
+  if (!Number.isFinite(velocity.x) || !Number.isFinite(velocity.y) || !Number.isFinite(z)) {
+    throw new RangeError(`${label} must have finite x/y/z`);
   }
-  return velocity;
+  return { x: velocity.x, y: velocity.y, z };
 };
 
 const computeLimbPenalty = (limbs, impairedPenalty, severedPenalty) => {
@@ -63,9 +64,11 @@ const applyPostureDrag = (body, posture, stumbleDrag, fallDrag) => {
   if (posture === "stumbling") {
     body.velocity.x *= stumbleDrag;
     body.velocity.y *= stumbleDrag;
+    body.velocity.z *= stumbleDrag;
   } else if (posture === "fallen") {
     body.velocity.x *= fallDrag;
     body.velocity.y *= fallDrag;
+    body.velocity.z *= fallDrag;
   }
 };
 
@@ -142,7 +145,7 @@ export const createBalanceSystem = ({
     }
 
     const dt = deltaMs / 1000;
-    const speed = Math.hypot(body.velocity.x, body.velocity.y);
+    const speed = Math.hypot(body.velocity.x, body.velocity.y, body.velocity.z);
     const limbPenalty = computeLimbPenalty(model.limbs, resolvedImpairedPenalty, resolvedSeveredPenalty);
     const speedPenalty = speed * resolvedSpeedPenalty;
     const baseTarget = model.balance.baseStability - limbPenalty - speedPenalty;
@@ -163,9 +166,10 @@ export const createBalanceSystem = ({
       const resolvedPrev = validateVelocity(previousVelocity, "previousVelocity");
       const accel = {
         x: (body.velocity.x - resolvedPrev.x) / dt,
-        y: (body.velocity.y - resolvedPrev.y) / dt
+        y: (body.velocity.y - resolvedPrev.y) / dt,
+        z: (body.velocity.z - resolvedPrev.z) / dt
       };
-      const accelMagnitude = Math.hypot(accel.x, accel.y);
+      const accelMagnitude = Math.hypot(accel.x, accel.y, accel.z);
       impactUpdates = applyImpactStress(model, accelMagnitude, resolvedImpactThreshold, resolvedImpactStress);
     }
 

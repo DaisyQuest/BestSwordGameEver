@@ -54,7 +54,7 @@ describe("playerSystem", () => {
 
   it("updates balance and tracks velocity", () => {
     const world = createPhysicsWorld({ gravity: { x: 0, y: 0 } });
-    world.createBody({ id: "hero", velocity: { x: 2, y: 0 }, damping: 1 });
+    world.createBody({ id: "hero", velocity: { x: 2, y: 0, z: 0 }, damping: 1 });
 
     const system = createPlayerSystem({ balance: { impactThreshold: 0 } });
     system.addPlayer({ id: "hero" });
@@ -64,16 +64,16 @@ describe("playerSystem", () => {
       previousVelocity: { x: 0, y: 0 }
     });
     expect(report.impactUpdates).toHaveLength(2);
-    expect(system.getPlayer("hero").lastVelocity).toEqual({ x: 2, y: 0 });
+    expect(system.getPlayer("hero").lastVelocity).toEqual({ x: 2, y: 0, z: 0 });
 
     world.getBody("hero").velocity.x = 3;
     const second = system.updateBalance(world, "hero", "hero", { deltaMs: 1000 });
     expect(second.impactUpdates).toHaveLength(2);
-    expect(system.getPlayer("hero").lastVelocity).toEqual({ x: 3, y: 0 });
+    expect(system.getPlayer("hero").lastVelocity).toEqual({ x: 3, y: 0, z: 0 });
   });
 
   it("respects balance options and snapshots players", () => {
-    const body = { velocity: { x: 1, y: 0 } };
+    const body = { velocity: { x: 1, y: 0, z: 0 } };
     let calls = 0;
     const world = {
       getBody: () => {

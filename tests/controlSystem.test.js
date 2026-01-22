@@ -23,6 +23,7 @@ describe("controlSystem", () => {
     const intent = mapper.mapInputs([
       { code: "KeyW", active: true },
       { code: "KeyA", active: true },
+      { code: "ShiftLeft", active: true },
       { code: "Space", active: true },
       { code: "KeyQ", active: true },
       { code: "KeyE", active: false }
@@ -30,6 +31,7 @@ describe("controlSystem", () => {
 
     expect(intent.move.y).toBeGreaterThan(0);
     expect(intent.move.x).toBeLessThan(0);
+    expect(intent.move.z).toBeGreaterThan(0);
     expect(intent.kicks.primary).toBe(true);
     expect(intent.grabs.left).toBe(true);
   });
@@ -41,7 +43,7 @@ describe("controlSystem", () => {
       { code: "KeyD", active: true }
     ]);
 
-    const magnitude = Math.hypot(intent.move.x, intent.move.y);
+    const magnitude = Math.hypot(intent.move.x, intent.move.y, intent.move.z);
     expect(magnitude).toBeCloseTo(1);
   });
 
@@ -52,6 +54,8 @@ describe("controlSystem", () => {
         moveDown: "ArrowDown",
         moveLeft: "ArrowLeft",
         moveRight: "ArrowRight",
+        moveAscend: "PageUp",
+        moveDescend: "PageDown",
         kickPrimary: "KeyJ",
         kickSecondary: "KeyK",
         grabLeft: "KeyU",
@@ -60,7 +64,7 @@ describe("controlSystem", () => {
     });
 
     expect(mapper.mapInputs()).toEqual({
-      move: { x: 0, y: 0 },
+      move: { x: 0, y: 0, z: 0 },
       kicks: { primary: false, secondary: false },
       grabs: { left: false, right: false }
     });
@@ -68,12 +72,14 @@ describe("controlSystem", () => {
     const intent = mapper.mapInputs([
       { code: "ArrowDown", active: true },
       { code: "ArrowRight", active: true },
+      { code: "PageUp", active: true },
       { code: "KeyK", active: true },
       { code: "KeyI", active: true }
     ]);
 
     expect(intent.move.y).toBeLessThan(0);
     expect(intent.move.x).toBeGreaterThan(0);
+    expect(intent.move.z).toBeGreaterThan(0);
     expect(intent.kicks.secondary).toBe(true);
     expect(intent.grabs.right).toBe(true);
   });

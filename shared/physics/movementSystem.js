@@ -20,10 +20,11 @@ const normalizeIntent = (intent) => {
     throw new TypeError("intent.move must be an object");
   }
   const { x, y } = intent.move;
-  if (!Number.isFinite(x) || !Number.isFinite(y)) {
-    throw new RangeError("intent.move must have finite x/y");
+  const z = intent.move.z ?? 0;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    throw new RangeError("intent.move must have finite x/y/z");
   }
-  return { x, y };
+  return { x, y, z };
 };
 
 const normalizeForceMultiplier = (value) => {
@@ -55,22 +56,25 @@ export const createMovementController = ({
     const resolvedMultiplier = normalizeForceMultiplier(forceMultiplier);
 
     const move = normalizeIntent(intent);
-    const magnitude = Math.hypot(move.x, move.y);
+    const magnitude = Math.hypot(move.x, move.y, move.z);
     if (magnitude <= resolvedDeadzone) {
       return {
         applied: false,
-        force: { x: 0, y: 0 }
+        force: { x: 0, y: 0, z: 0 }
       };
     }
 
-    const normalized = magnitude > 1 ? { x: move.x / magnitude, y: move.y / magnitude } : move;
+    const normalized = magnitude > 1
+      ? { x: move.x / magnitude, y: move.y / magnitude, z: move.z / magnitude }
+      : move;
     const accel = resolvedMax * (sprint ? resolvedSprint : 1) * resolvedMultiplier;
 
     return {
       applied: true,
       force: {
         x: normalized.x * accel,
-        y: normalized.y * accel
+        y: normalized.y * accel,
+        z: normalized.z * accel
       }
     };
   };

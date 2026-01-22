@@ -3,6 +3,8 @@ const DEFAULT_BINDINGS = {
   moveDown: "KeyS",
   moveLeft: "KeyA",
   moveRight: "KeyD",
+  moveAscend: "ShiftLeft",
+  moveDescend: "ControlLeft",
   kickPrimary: "Space",
   kickSecondary: "Shift+Space",
   grabLeft: "KeyQ",
@@ -72,7 +74,8 @@ export const createControlMapper = ({ bindings = DEFAULT_BINDINGS } = {}) => {
     const intent = {
       move: {
         x: 0,
-        y: 0
+        y: 0,
+        z: 0
       },
       kicks: {
         primary: false,
@@ -88,6 +91,8 @@ export const createControlMapper = ({ bindings = DEFAULT_BINDINGS } = {}) => {
     const moveDown = mapping.get("moveDown");
     const moveLeft = mapping.get("moveLeft");
     const moveRight = mapping.get("moveRight");
+    const moveAscend = mapping.get("moveAscend");
+    const moveDescend = mapping.get("moveDescend");
 
     if (moveUp && active.has(moveUp)) {
       intent.move.y += 1;
@@ -100,6 +105,12 @@ export const createControlMapper = ({ bindings = DEFAULT_BINDINGS } = {}) => {
     }
     if (moveRight && active.has(moveRight)) {
       intent.move.x += 1;
+    }
+    if (moveAscend && active.has(moveAscend)) {
+      intent.move.z += 1;
+    }
+    if (moveDescend && active.has(moveDescend)) {
+      intent.move.z -= 1;
     }
 
     const kickPrimary = mapping.get("kickPrimary");
@@ -122,10 +133,11 @@ export const createControlMapper = ({ bindings = DEFAULT_BINDINGS } = {}) => {
       intent.grabs.right = true;
     }
 
-    const magnitude = Math.hypot(intent.move.x, intent.move.y);
+    const magnitude = Math.hypot(intent.move.x, intent.move.y, intent.move.z);
     if (magnitude > 1) {
       intent.move.x = intent.move.x / magnitude;
       intent.move.y = intent.move.y / magnitude;
+      intent.move.z = intent.move.z / magnitude;
     }
 
     return intent;

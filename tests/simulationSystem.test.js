@@ -15,7 +15,7 @@ describe("simulationSystem", () => {
   });
 
   it("steps actors with inputs and movement", () => {
-    const sim = createSimulation({ physics: { gravity: { x: 0, y: 0 }, maxSpeed: 50 } });
+    const sim = createSimulation({ physics: { gravity: { x: 0, y: 0, z: 0 }, maxSpeed: 50 } });
     sim.addActor({ id: "hero", body: { mass: 1, damping: 1 } });
 
     const result = sim.step(1000, "hero", [{ code: "KeyW", active: true }]);
@@ -33,6 +33,8 @@ describe("simulationSystem", () => {
         moveDown: "ArrowDown",
         moveLeft: "ArrowLeft",
         moveRight: "ArrowRight",
+        moveAscend: "PageUp",
+        moveDescend: "PageDown",
         kickPrimary: "KeyJ",
         kickSecondary: "KeyK",
         grabLeft: "KeyU",
@@ -59,7 +61,7 @@ describe("simulationSystem", () => {
     sim.addActor({ id: "runner", body: { mass: 1, damping: 1 } });
 
     const normal = sim.step(100, "runner", undefined);
-    expect(normal.intent.move).toEqual({ x: 0, y: 0 });
+    expect(normal.intent.move).toEqual({ x: 0, y: 0, z: 0 });
 
     const sprint = sim.step(100, "runner", [{ code: "KeyD", active: true }], { sprint: true });
     expect(sprint.movement.force.x).toBeGreaterThan(10);
