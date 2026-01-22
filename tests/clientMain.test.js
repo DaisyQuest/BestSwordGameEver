@@ -95,27 +95,67 @@ const buildSnapshot = ({
     : null
 });
 
-const stubContext = () => ({
-  setTransform: vi.fn(),
-  clearRect: vi.fn(),
-  fillRect: vi.fn(),
-  beginPath: vi.fn(),
-  arc: vi.fn(),
-  ellipse: vi.fn(),
-  closePath: vi.fn(),
-  stroke: vi.fn(),
-  fill: vi.fn(),
-  moveTo: vi.fn(),
-  lineTo: vi.fn(),
-  save: vi.fn(),
-  restore: vi.fn(),
-  shadowBlur: 0,
-  shadowColor: "",
-  globalAlpha: 1,
-  strokeStyle: "",
-  fillStyle: "",
-  lineWidth: 1
-});
+const stubContext = () => {
+  const styleHistory = {
+    strokeStyles: [],
+    fillStyles: [],
+    shadowColors: [],
+    lineWidths: []
+  };
+  const context = {
+    setTransform: vi.fn(),
+    clearRect: vi.fn(),
+    fillRect: vi.fn(),
+    beginPath: vi.fn(),
+    arc: vi.fn(),
+    ellipse: vi.fn(),
+    closePath: vi.fn(),
+    stroke: vi.fn(),
+    fill: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    shadowBlur: 0,
+    globalAlpha: 1,
+    _strokeStyle: "",
+    _fillStyle: "",
+    _shadowColor: "",
+    _lineWidth: 1,
+    styleHistory
+  };
+
+  Object.defineProperty(context, "strokeStyle", {
+    get: () => context._strokeStyle,
+    set: (value) => {
+      context._strokeStyle = value;
+      styleHistory.strokeStyles.push(value);
+    }
+  });
+  Object.defineProperty(context, "fillStyle", {
+    get: () => context._fillStyle,
+    set: (value) => {
+      context._fillStyle = value;
+      styleHistory.fillStyles.push(value);
+    }
+  });
+  Object.defineProperty(context, "shadowColor", {
+    get: () => context._shadowColor,
+    set: (value) => {
+      context._shadowColor = value;
+      styleHistory.shadowColors.push(value);
+    }
+  });
+  Object.defineProperty(context, "lineWidth", {
+    get: () => context._lineWidth,
+    set: (value) => {
+      context._lineWidth = value;
+      styleHistory.lineWidths.push(value);
+    }
+  });
+
+  return context;
+};
 
 const normalize2d = (vector) => {
   const length = Math.hypot(vector.x, vector.y);
@@ -423,6 +463,44 @@ describe("client main", () => {
       ([x, y]) => Math.abs(x - expected.x) < 0.1 && Math.abs(y - expected.y) < 0.1
     );
     expect(matched).toBe(true);
+  });
+
+  it("applies weapon skins based on type", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    const snapshot = buildSnapshot({ exhausted: false, weapons: true, geometry: true, reach: 1.2, weaponType: "mace" });
+    mockSession.getSnapshot.mockImplementation(() => snapshot);
+    mockSession.reset.mockImplementation(() => snapshot);
+    mockSession.step.mockImplementation(() => snapshot);
+
+    const { canvasContext, rafCallbacks } = setupDom();
+    await import("../client/main.js");
+
+    const start = performance.now();
+    rafCallbacks.shift()(start);
+    rafCallbacks.shift()(start + 16);
+
+    expect(canvasContext.styleHistory.fillStyles).toContain("rgba(186, 120, 68, 0.35)");
+    expect(canvasContext.styleHistory.strokeStyles).toContain("rgba(255, 196, 120, 0.95)");
+    expect(canvasContext.styleHistory.strokeStyles).toContain("rgba(120, 82, 46, 0.9)");
+  });
+
+  it("falls back to sword skin for unknown weapon types", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    const snapshot = buildSnapshot({ exhausted: false, weapons: true, geometry: true, reach: 1.2, weaponType: "mystery" });
+    mockSession.getSnapshot.mockImplementation(() => snapshot);
+    mockSession.reset.mockImplementation(() => snapshot);
+    mockSession.step.mockImplementation(() => snapshot);
+
+    const { canvasContext, rafCallbacks } = setupDom();
+    await import("../client/main.js");
+
+    const start = performance.now();
+    rafCallbacks.shift()(start);
+    rafCallbacks.shift()(start + 16);
+
+    expect(canvasContext.styleHistory.strokeStyles).toContain("rgba(220, 232, 255, 0.95)");
   });
 
   it("toggles reduced motion rendering", async () => {

@@ -181,13 +181,81 @@ const resolveAttackType = (weaponType) => {
   return "slash";
 };
 
+const normalizeWeaponMass = (weapon, label) => {
+  if (!weapon || typeof weapon !== "object") {
+    throw new TypeError(`${label} must be an object`);
+  }
+  if (!Number.isFinite(weapon.mass) || weapon.mass <= 0) {
+    throw new RangeError(`${label} must include a positive mass`);
+  }
+  return weapon.mass;
+};
+
+const clampRange = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const computeWeaponCarryMultiplier = (weapon) => {
+  const mass = normalizeWeaponMass(weapon, "weapon");
+  const scaled = 1 / (1 + mass * 0.12);
+  return clampRange(scaled, 0.6, 1);
+};
+
 const computeImpactVelocity = ({ attackerBody, defenderBody, weaponPose }) => {
   const relativeSpeed = Math.hypot(
     attackerBody.velocity.x - defenderBody.velocity.x,
     attackerBody.velocity.y - defenderBody.velocity.y
   );
-  const swingBoost = 2 + weaponPose.swingPhase * 6;
+  const tipSpeed = Number.isFinite(weaponPose?.tipSpeed) ? weaponPose.tipSpeed : 0;
+  const fallbackSwingPhase = Number.isFinite(weaponPose?.swingPhase) ? weaponPose.swingPhase : 0;
+  const swingBoost = tipSpeed > 0 ? tipSpeed : 2 + fallbackSwingPhase * 6;
   return Math.max(1, relativeSpeed + swingBoost);
+};
+
+const computeWeaponCollision = ({ attackerBody, defenderBody, weaponState, rangePadding = HIT_RANGE_PADDING } = {}) => {
+  if (!attackerBody || typeof attackerBody !== "object" || !attackerBody.position) {
+    throw new TypeError("attackerBody must include position");
+  }
+  if (!defenderBody || typeof defenderBody !== "object" || !defenderBody.position) {
+    throw new TypeError("defenderBody must include position");
+  }
+  if (!weaponState || typeof weaponState !== "object" || !weaponState.pose || !weaponState.weapon) {
+    throw new TypeError("weaponState must include weapon and pose");
+  }
+  if (!Number.isFinite(rangePadding) || rangePadding < 0) {
+    throw new RangeError("rangePadding must be a non-negative number");
+  }
+
+  const pose = weaponState.pose;
+  const weapon = weaponState.weapon;
+  const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
+  const angle = Number.isFinite(pose.angle) ? pose.angle : 0;
+  const tip = {
+    x: attackerBody.position.x + Math.cos(angle) * reach,
+    y: attackerBody.position.y + Math.sin(angle) * reach
+  };
+  const delta = {
+    x: tip.x - attackerBody.position.x,
+    y: tip.y - attackerBody.position.y
+  };
+  const lengthSq = delta.x * delta.x + delta.y * delta.y;
+  const toDefender = {
+    x: defenderBody.position.x - attackerBody.position.x,
+    y: defenderBody.position.y - attackerBody.position.y
+  };
+  const t = lengthSq > 0 ? Math.min(1, Math.max(0, (toDefender.x * delta.x + toDefender.y * delta.y) / lengthSq)) : 0;
+  const closest = {
+    x: attackerBody.position.x + delta.x * t,
+    y: attackerBody.position.y + delta.y * t
+  };
+  const distance = Math.hypot(defenderBody.position.x - closest.x, defenderBody.position.y - closest.y);
+  const baseWidth = weapon.geometry?.width ?? weapon.length * 0.1;
+  const radius = baseWidth / 2 + rangePadding;
+  return {
+    hit: distance <= radius,
+    distance,
+    radius,
+    closest,
+    tip
+  };
 };
 
 const computeCombatantHealth = (combatant) => {
@@ -286,13 +354,16 @@ const computeWeaponPose = (
   const baseAngle = dominantHand === "left" ? Math.PI - resolvedGuard : resolvedGuard;
   const angle = baseAngle + oscillation * resolvedArc;
   const reach = weapon.length * (0.85 + 0.15 * swingPhase);
+  const angularVelocity = resolvedArc * Math.cos(phase) * resolvedSpeed * Math.PI * 2;
+  const tipSpeed = Math.abs(angularVelocity) * reach;
 
   return {
     angle,
     reach,
     swingPhase,
     swinging: swingPhase > 0.55,
-    dominantHand
+    dominantHand,
+    tipSpeed
   };
 };
 
@@ -439,13 +510,21 @@ const computeControlledWeaponPose = ({
   const angle = aimAngle + sway + swingUpdate.direction * (swingUpdate.swingPhase - 0.5) * swingArc;
   const reachBase = weapon.length * (guardActive ? 0.76 : 0.9) * (model.stamina.exhausted ? 0.95 : 1);
   const reach = reachBase * (1 + swingUpdate.swingPhase * 0.18);
+  const durationSec = durationMs / 1000;
+  const phase = swingState.progress * Math.PI;
+  const swingPhaseRate = swingUpdate.swinging && durationSec > 0
+    ? Math.cos(phase) * Math.PI / durationSec
+    : 0;
+  const angularVelocity = swingArc * swingPhaseRate;
+  const tipSpeed = Math.abs(angularVelocity) * reach;
 
   return {
     angle,
     reach,
     swingPhase: swingUpdate.swingPhase,
     swinging: swingUpdate.swinging,
-    dominantHand: model.dominantHand
+    dominantHand: model.dominantHand,
+    tipSpeed
   };
 };
 
@@ -631,12 +710,13 @@ export const createDemoSession = ({
     if (clockMs - lastHitTimes[attackerId] < HIT_COOLDOWN_MS) {
       return null;
     }
-    const distance = Math.hypot(
-      attackerBody.position.x - defenderBody.position.x,
-      attackerBody.position.y - defenderBody.position.y
-    );
-    const reach = Number.isFinite(pose.reach) ? pose.reach : weaponState.weapon.length;
-    if (distance > reach + HIT_RANGE_PADDING) {
+    const collision = computeWeaponCollision({
+      attackerBody,
+      defenderBody,
+      weaponState,
+      rangePadding: HIT_RANGE_PADDING
+    });
+    if (!collision.hit) {
       return null;
     }
 
@@ -727,8 +807,9 @@ export const createDemoSession = ({
     const rivalLocomotion = locomotionSystem.computeModifiers(rivalRecord.model, {
       stepIndex
     });
+    const rivalWeaponMultiplier = computeWeaponCarryMultiplier(weaponLoadout.rival);
     simulation.mover.applyMovement(simulation.world, resolvedRivalId, rivalIntent, {
-      forceMultiplier: rivalLocomotion.forceMultiplier
+      forceMultiplier: rivalLocomotion.forceMultiplier * rivalWeaponMultiplier
     });
 
     const playerRecord = playerSystem.getPlayer(resolvedPlayerId);
@@ -743,7 +824,9 @@ export const createDemoSession = ({
       stepIndex
     });
     const forceMultiplier =
-      computeStaminaMultiplier(playerRecord.model.stamina) * locomotionReport.forceMultiplier;
+      computeStaminaMultiplier(playerRecord.model.stamina) *
+      locomotionReport.forceMultiplier *
+      computeWeaponCarryMultiplier(weaponLoadout.player);
     const playerStep = simulation.step(deltaMs, resolvedPlayerId, inputs, {
       sprint: canSprint,
       forceMultiplier
@@ -922,6 +1005,8 @@ export const __testables = {
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,
+  computeWeaponCarryMultiplier,
+  computeWeaponCollision,
   normalizeBodyConfig,
   selectHitPart,
   selectHitOrgan,

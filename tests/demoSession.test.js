@@ -17,6 +17,8 @@ const {
   computeSwingDuration,
   advanceWeaponSwing,
   computeControlledWeaponPose,
+  computeWeaponCarryMultiplier,
+  computeWeaponCollision,
   normalizeBodyConfig,
   selectHitPart,
   selectHitOrgan,
@@ -221,9 +223,16 @@ describe("demoSession", () => {
     const impactVelocity = computeImpactVelocity({
       attackerBody: { velocity: { x: 1, y: 0 } },
       defenderBody: { velocity: { x: 0, y: 0 } },
+      weaponPose: { swingPhase: 0.5, tipSpeed: 4 }
+    });
+    expect(impactVelocity).toBeGreaterThan(4);
+
+    const fallbackImpact = computeImpactVelocity({
+      attackerBody: { velocity: { x: 0, y: 0 } },
+      defenderBody: { velocity: { x: 0, y: 0 } },
       weaponPose: { swingPhase: 0.5 }
     });
-    expect(impactVelocity).toBeGreaterThan(1);
+    expect(fallbackImpact).toBeGreaterThan(2);
 
     const health = computeCombatantHealth(combatant);
     expect(health.current).toBe(290);
@@ -258,6 +267,7 @@ describe("demoSession", () => {
     expect(pose.dominantHand).toBe("left");
     expect(pose.reach).toBeGreaterThan(0);
     expect(pose.swinging).toBe(false);
+    expect(pose.tipSpeed).toBeTypeOf("number");
 
     const swingPose = computeWeaponPose(250, {
       weapon: loadout.player,
@@ -268,6 +278,7 @@ describe("demoSession", () => {
       guardAngle: 0.2
     });
     expect(swingPose.swinging).toBe(true);
+    expect(swingPose.tipSpeed).toBeGreaterThan(0);
 
     expect(() => computeWeaponPose(-1, { weapon: loadout.player })).toThrow(RangeError);
     expect(() => computeWeaponPose(0, { weapon: null })).toThrow(TypeError);
@@ -284,6 +295,7 @@ describe("demoSession", () => {
     });
     expect(state.pose.swinging).toBeTypeOf("boolean");
     expect(state.pose.dominantHand).toBe("right");
+    expect(state.pose.tipSpeed).toBeGreaterThanOrEqual(0);
 
     const restedState = buildWeaponState({
       weapon: loadout.player,
@@ -291,6 +303,7 @@ describe("demoSession", () => {
       elapsedMs: 0
     });
     expect(restedState.pose.swinging).toBe(false);
+    expect(restedState.pose.tipSpeed).toBeGreaterThanOrEqual(0);
 
     expect(() => buildWeaponState({ weapon: null })).toThrow(TypeError);
     expect(() => buildWeaponState({ weapon: loadout.player, model: null })).toThrow(TypeError);
@@ -369,6 +382,61 @@ describe("demoSession", () => {
     });
     expect(controlPose.reach).toBeGreaterThan(0);
     expect(controlPose.swinging).toBe(true);
+    expect(controlPose.tipSpeed).toBeGreaterThan(0);
+  });
+
+  it("scales movement based on weapon mass", () => {
+    expect(() => computeWeaponCarryMultiplier(null)).toThrow(TypeError);
+    expect(() => computeWeaponCarryMultiplier({ mass: 0 })).toThrow(RangeError);
+    expect(computeWeaponCarryMultiplier({ mass: 1 })).toBeGreaterThan(0.8);
+    expect(computeWeaponCarryMultiplier({ mass: 6 })).toBeLessThan(0.7);
+  });
+
+  it("detects weapon collisions using swing geometry", () => {
+    expect(() => computeWeaponCollision()).toThrow(TypeError);
+    expect(() =>
+      computeWeaponCollision({
+        attackerBody: { position: { x: 0, y: 0 } },
+        defenderBody: { position: { x: 0, y: 0 } },
+        weaponState: { weapon: { length: 1 }, pose: { reach: 1, angle: 0 } },
+        rangePadding: -1
+      })
+    ).toThrow(RangeError);
+
+    const hit = computeWeaponCollision({
+      attackerBody: { position: { x: 0, y: 0 } },
+      defenderBody: { position: { x: 1, y: 0 } },
+      weaponState: {
+        weapon: { length: 1, geometry: { width: 0.2 } },
+        pose: { reach: 1, angle: 0 }
+      },
+      rangePadding: 0
+    });
+    expect(hit.hit).toBe(true);
+    expect(hit.distance).toBeCloseTo(0);
+
+    const miss = computeWeaponCollision({
+      attackerBody: { position: { x: 0, y: 0 } },
+      defenderBody: { position: { x: 0, y: 1 } },
+      weaponState: {
+        weapon: { length: 1, geometry: { width: 0.2 } },
+        pose: { reach: 1, angle: 0 }
+      },
+      rangePadding: 0
+    });
+    expect(miss.hit).toBe(false);
+
+    const fallbackWidth = computeWeaponCollision({
+      attackerBody: { position: { x: 0, y: 0 } },
+      defenderBody: { position: { x: 0.09, y: 0 } },
+      weaponState: {
+        weapon: { length: 2 },
+        pose: { reach: 0, angle: 0 }
+      },
+      rangePadding: 0
+    });
+    expect(fallbackWidth.radius).toBeCloseTo(0.1);
+    expect(fallbackWidth.hit).toBe(true);
   });
 
   it("validates deltaMs", () => {

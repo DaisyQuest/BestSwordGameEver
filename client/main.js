@@ -35,7 +35,77 @@ const ACTOR_RENDER = {
   spineWidth: 8,
   headRadius: 14
 };
+const WEAPON_SKINS = {
+  sword: {
+    stroke: "rgba(220, 232, 255, 0.95)",
+    fill: "rgba(180, 200, 235, 0.35)",
+    hilt: "rgba(120, 143, 184, 0.9)",
+    swingStroke: "rgba(255, 214, 102, 0.9)",
+    swingFill: "rgba(255, 214, 102, 0.35)",
+    trail: "rgba(186, 215, 255, 0.55)"
+  },
+  dagger: {
+    stroke: "rgba(168, 255, 224, 0.95)",
+    fill: "rgba(96, 210, 176, 0.35)",
+    hilt: "rgba(76, 130, 114, 0.9)",
+    swingStroke: "rgba(255, 190, 140, 0.9)",
+    swingFill: "rgba(255, 190, 140, 0.35)",
+    trail: "rgba(126, 244, 214, 0.5)"
+  },
+  mace: {
+    stroke: "rgba(255, 196, 120, 0.95)",
+    fill: "rgba(186, 120, 68, 0.35)",
+    hilt: "rgba(120, 82, 46, 0.9)",
+    swingStroke: "rgba(255, 160, 108, 0.9)",
+    swingFill: "rgba(255, 160, 108, 0.35)",
+    trail: "rgba(255, 175, 120, 0.55)"
+  },
+  club: {
+    stroke: "rgba(210, 170, 120, 0.95)",
+    fill: "rgba(140, 96, 54, 0.35)",
+    hilt: "rgba(110, 76, 44, 0.9)",
+    swingStroke: "rgba(255, 202, 140, 0.9)",
+    swingFill: "rgba(255, 202, 140, 0.35)",
+    trail: "rgba(210, 170, 120, 0.5)"
+  },
+  spear: {
+    stroke: "rgba(210, 245, 255, 0.95)",
+    fill: "rgba(140, 200, 210, 0.35)",
+    hilt: "rgba(100, 130, 140, 0.9)",
+    swingStroke: "rgba(160, 220, 255, 0.9)",
+    swingFill: "rgba(160, 220, 255, 0.35)",
+    trail: "rgba(150, 220, 255, 0.55)"
+  },
+  halberd: {
+    stroke: "rgba(182, 255, 188, 0.95)",
+    fill: "rgba(110, 195, 126, 0.35)",
+    hilt: "rgba(86, 130, 96, 0.9)",
+    swingStroke: "rgba(255, 236, 140, 0.9)",
+    swingFill: "rgba(255, 236, 140, 0.35)",
+    trail: "rgba(170, 245, 190, 0.5)"
+  },
+  greatsword: {
+    stroke: "rgba(198, 182, 255, 0.95)",
+    fill: "rgba(130, 110, 210, 0.35)",
+    hilt: "rgba(96, 82, 150, 0.9)",
+    swingStroke: "rgba(255, 180, 230, 0.9)",
+    swingFill: "rgba(255, 180, 230, 0.35)",
+    trail: "rgba(196, 176, 255, 0.55)"
+  },
+  shield: {
+    stroke: "rgba(210, 220, 232, 0.95)",
+    fill: "rgba(120, 132, 150, 0.35)",
+    hilt: "rgba(100, 110, 128, 0.9)",
+    swingStroke: "rgba(255, 215, 170, 0.9)",
+    swingFill: "rgba(255, 215, 170, 0.35)",
+    trail: "rgba(190, 210, 230, 0.5)"
+  }
+};
 const WEAPON_RENDER_SCALE = 1.35;
+const getWeaponSkin = (weapon) => {
+  const type = weapon?.type ?? "sword";
+  return WEAPON_SKINS[type] ?? WEAPON_SKINS.sword;
+};
 
 const inputState = new Set();
 let lastTime = null;
@@ -410,6 +480,7 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
     return;
   }
   const { weapon, pose } = weaponState;
+  const skin = getWeaponSkin(weapon);
   const postureHeight = getPostureHeight(actor.model.posture);
   const handHeight = postureHeight * 0.7;
   const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
@@ -429,7 +500,7 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
   const anchorPoint = projectPoint(anchor, center, scale, camera);
   const tipPoint = projectPoint(tip, center, scale, camera);
   ctx.save();
-  ctx.strokeStyle = pose.swinging ? "rgba(255, 214, 102, 0.9)" : color;
+  ctx.strokeStyle = pose.swinging ? skin.swingStroke : skin.stroke ?? color;
   ctx.lineWidth = pose.swinging ? 6 : 5;
 
   if (weapon.geometry?.points?.length) {
@@ -448,7 +519,7 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
       ctx.lineTo(points[i].x, points[i].y);
     }
     ctx.closePath();
-    ctx.fillStyle = pose.swinging ? "rgba(255, 214, 102, 0.35)" : "rgba(255, 255, 255, 0.15)";
+    ctx.fillStyle = pose.swinging ? skin.swingFill : skin.fill;
     ctx.fill();
     ctx.stroke();
   } else {
@@ -458,6 +529,35 @@ const drawWeapon = (center, scale, camera, actor, weaponState, color) => {
     ctx.stroke();
   }
 
+  const guardSize = Math.max(6, renderReach * 0.08);
+  const guardAngle = pose.angle + Math.PI / 2;
+  const guardLeft = projectPoint(
+    {
+      x: anchor.x + Math.cos(guardAngle) * guardSize,
+      y: anchor.y + Math.sin(guardAngle) * guardSize,
+      z: handHeight
+    },
+    center,
+    scale,
+    camera
+  );
+  const guardRight = projectPoint(
+    {
+      x: anchor.x - Math.cos(guardAngle) * guardSize,
+      y: anchor.y - Math.sin(guardAngle) * guardSize,
+      z: handHeight
+    },
+    center,
+    scale,
+    camera
+  );
+  ctx.strokeStyle = skin.hilt ?? color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(guardLeft.x, guardLeft.y);
+  ctx.lineTo(guardRight.x, guardRight.y);
+  ctx.stroke();
+
   ctx.restore();
 };
 
@@ -466,6 +566,7 @@ const drawWeaponTrail = (center, scale, camera, actor, weaponState, color) => {
     return;
   }
   const { weapon, pose } = weaponState;
+  const skin = getWeaponSkin(weapon);
   const postureHeight = getPostureHeight(actor.model.posture);
   const handHeight = postureHeight * 0.7;
   const reach = Number.isFinite(pose.reach) ? pose.reach : weapon.length;
@@ -475,7 +576,7 @@ const drawWeaponTrail = (center, scale, camera, actor, weaponState, color) => {
   const endAngle = pose.angle + trailSpread / 2;
   const segments = 14;
   ctx.save();
-  ctx.strokeStyle = color;
+  ctx.strokeStyle = skin.trail ?? color;
   ctx.lineWidth = 2;
   ctx.globalAlpha = 0.6;
   ctx.beginPath();
